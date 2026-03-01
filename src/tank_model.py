@@ -45,6 +45,7 @@ class TankParams:
     f_ashp:  np.ndarray = field(default_factory=lambda: np.array([0.1, 0.4, 0.3, 0.2]))
     f_imm:   np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 0.2, 0.8]))
     mix_coeff: float = 0.01
+    draw_ua: np.ndarray = field(default_factory=lambda: np.array([0.01, 0.005, 0.002, 0.001]))
 
     def to_vector(self) -> np.ndarray:
         """Flatten all parameters to a 1-D vector for optimisation."""
@@ -55,7 +56,8 @@ class TankParams:
             self.f_ashp,        # 4
             self.f_imm,         # 4
             [self.mix_coeff],   # 1
-        ])                      # total = 20
+            self.draw_ua,       # 4
+        ])                      # total = 24
 
     @classmethod
     def from_vector(cls, v: np.ndarray) -> "TankParams":
@@ -66,6 +68,7 @@ class TankParams:
         p.f_ashp     = v[11:15]
         p.f_imm      = v[15:19]
         p.mix_coeff  = float(v[19])
+        p.draw_ua    = v[20:24]
         return p
 
     @staticmethod
@@ -77,6 +80,7 @@ class TankParams:
             0, 0, 0, 0,               # f_ashp
             0, 0, 0, 0,               # f_imm
             0,                         # mix_coeff
+            0, 0, 0, 0,               # draw_ua
         ], dtype=float)
 
     @staticmethod
@@ -88,6 +92,7 @@ class TankParams:
             1, 1, 1, 1,               # f_ashp
             1, 1, 1, 1,               # f_imm
             0.2,                       # mix_coeff
+            0.1, 0.1, 0.1, 0.1,       # draw_ua
         ], dtype=float)
 
 
@@ -116,6 +121,7 @@ def tank_step(
     """
     T = np.array(T, dtype=float)
     T_new = T.copy()
+    T_mains = 10.0  # assumed cold mains temperature [°C]
 
     # Convert kWh → kJ for the interval
     Q_st_kj  = Q_st_kwh * 3600.0
@@ -145,7 +151,10 @@ def tank_step(
         if i < 3:
             mix += params.mix_coeff * (T[i + 1] - T[i]) * dt_s
 
-        dT = (dQ - loss + cond + mix) / NODE_CAP
+        # Draw loss — cold mains water replacement [kJ]
+        draw_loss = params.draw_ua[i] * (T[i] - T_mains) * dt_s
+
+        dT = (dQ - loss + cond + mix - draw_loss) / NODE_CAP
         T_new[i] = T[i] + dT
 
     # Enforce plausible bounds

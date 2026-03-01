@@ -83,8 +83,15 @@ def fit_ashp_maps(
     T_s = np.asarray(T_sink, dtype=float)
     P_meas = np.asarray(P_meas_kwh, dtype=float)
 
-    # Mask: only intervals where ASHP was running (P > small threshold)
-    mask = np.isfinite(P_meas) & (P_meas > 0.01) & np.isfinite(T_a) & np.isfinite(T_s)
+    # Mask: only intervals where ASHP was running at substantial load.
+    # Use a high percentile threshold so we fit steady-state power
+    # (not partial duty-cycle intervals).
+    valid = np.isfinite(P_meas) & (P_meas > 0.05) & np.isfinite(T_a) & np.isfinite(T_s)
+    if valid.sum() > 50:
+        p75 = np.percentile(P_meas[valid], 75)
+        mask = valid & (P_meas >= p75)
+    else:
+        mask = valid
     T_a_f, T_s_f, P_f = T_a[mask], T_s[mask], P_meas[mask]
 
     # Convert interval kWh → average kW
@@ -92,7 +99,12 @@ def fit_ashp_maps(
 
     # Fit power map: P_elec = b0 + b1*T_a + b2*T_s + b3*T_a*T_s
     X = np.column_stack([np.ones(len(T_a_f)), T_a_f, T_s_f, T_a_f * T_s_f])
-    b_init = np.array([3.0, -0.02, 0.03, 0.0])
+
+    # Use OLS for a good initial guess, then refine with robust loss
+    b_ols, _, _, _ = np.linalg.lstsq(X, P_kw, rcond=None)
+    b_lo = np.array([-20.0, -0.5, -0.5, -0.02])
+    b_hi = np.array([20.0,   0.5,  0.5,  0.02])
+    b_init = np.clip(b_ols, b_lo + 1e-6, b_hi - 1e-6)
 
     def power_residuals(b):
         pred = X @ b
@@ -101,8 +113,7 @@ def fit_ashp_maps(
 
     res_b = least_squares(
         power_residuals, b_init,
-        bounds=([-np.inf, -np.inf, -np.inf, -np.inf],
-                [np.inf,  np.inf,  np.inf,  np.inf]),
+        bounds=(b_lo, b_hi),
         loss="soft_l1",
     )
 

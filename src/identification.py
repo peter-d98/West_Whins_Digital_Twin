@@ -46,10 +46,10 @@ def prepare_inputs(df: pd.DataFrame, ashp_p: ashp_model.ASHPParams, dt_h: float 
 
     # ASHP heat from map
     T_sink = ashp_model.sink_proxy(df["tank_mid_c"].values, df["tank_top_c"].values)
-    Q_ashp_kw = ashp_model.predict_capacity(df["t_amb_c"].values, T_sink, ashp_p)
-    # But only deliver heat when ASHP is running (inst > threshold)
-    ashp_running = df["ashp_inst_kwh"].fillna(0).values > 0.01
-    Q_ashp = np.where(ashp_running, Q_ashp_kw * dt_h, 0.0)
+    # Use measured electrical × COP from map to derive heat delivered
+    cop = ashp_model.predict_cop(df["t_amb_c"].values, T_sink, ashp_p)
+    P_meas = df["ashp_inst_kwh"].fillna(0).values
+    Q_ashp = P_meas * cop  # kWh heat = kWh elec × COP
 
     # Immersion
     Q_imm = df["imm_tot_inst_kwh"].fillna(0).values
@@ -71,17 +71,17 @@ def fit_tank_params(
     max_nfev: int = 300,
     reg_weight: float = 0.01,
 ) -> tank_model.TankParams:
-    """Fit tank parameters against measured node temperatures.
+    """Fit tank parameters using one-step-ahead (teacher-forced) residuals.
 
-    Uses ``least_squares`` with soft-L1 loss for robustness.
+    Each step resets to the measured state, so the residuals are the
+    one-step prediction errors.  This avoids error accumulation and gives
+    stable parameter estimates.
     """
     T_meas = inputs["T_meas"]
     Q_st   = inputs["Q_st"]
     Q_ashp = inputs["Q_ashp"]
     Q_imm  = inputs["Q_imm"]
     T_amb  = inputs["T_amb"]
-    # We have N measurement rows; simulate N-1 steps from T_meas[0]
-    # using inputs[0:N-1] to predict T_meas[1:N].
     N = len(Q_st)
     steps = N - 1
 
@@ -95,13 +95,15 @@ def fit_tank_params(
 
     def residuals(x):
         p = tank_model.TankParams.from_vector(x)
-        T0 = T_meas[0]
-        T_sim = tank_model.simulate(
-            T0, Q_st[:steps], Q_ashp[:steps], Q_imm[:steps], T_amb[:steps], p,
-        )
-        # T_sim is (steps+1, 4); compare T_sim[1:] with T_meas[1:N]
-        err = (T_sim[1:] - T_meas[1:N]).ravel()
-
+        # One-step-ahead: predict T[k+1] from measured T[k]
+        T_pred = np.zeros((steps, 4))
+        for k in range(steps):
+            T_pred[k] = tank_model.tank_step(
+                T_meas[k],
+                float(Q_st[k]), float(Q_ashp[k]),
+                float(Q_imm[k]), float(T_amb[k]), p,
+            )
+        err = (T_pred - T_meas[1: steps + 1]).ravel()
         # Regularisation toward defaults
         reg = reg_weight * (x - p0.to_vector())
         return np.concatenate([err, reg])

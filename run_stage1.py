@@ -96,6 +96,7 @@ def _save_params(id_result: identification.IdentificationResult, path: Path) -> 
             "f_ashp":  id_result.tank_params.f_ashp.tolist(),
             "f_imm":   id_result.tank_params.f_imm.tolist(),
             "mix_coeff": id_result.tank_params.mix_coeff,
+            "draw_ua": id_result.tank_params.draw_ua.tolist(),
         },
         "ashp": {
             "a": id_result.ashp_params.a.tolist(),
