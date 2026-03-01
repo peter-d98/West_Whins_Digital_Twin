@@ -1,0 +1,66 @@
+# column_mapping.yaml
+# Canonical → actual CSV header names. Set to null if not available.
+
+paths:
+  plant_csv: null          # set externally (no filename/link hard-coded)
+  weather_csv: null        # not used (ambient provided as T_amb [C])
+  wind_csv: null
+
+time:
+  name: "Time"
+  format: "%d/%m/%Y %H:%M"
+  timezone: "Europe/London"
+
+# Ambient (plant room) temperature used for tank losses and ASHP maps
+ambient:
+  ambient_c: "T_amb [C]"   # added column (OAT + 10 °C approximation)
+
+# 4-node tank temperatures
+tank:
+  bottom_c: "Tank Bottom [°C]"
+  mid_c:    "Tank Mid [°C]"
+  mid_hi_c: "Tank Mid Hi [°C]"
+  top_c:    "Tank Top [°C]"
+
+# Solar-thermal (Stage-1 uses ST as-measured)
+solar_thermal:
+  power_kw:       "ST Power [kW]"       # if absent, derive from flow & temps
+  flow_l:         "ST Flow [L]"
+  flow_temp_c:    "ST Flow T [°C]"
+  return_temp_c:  "ST Ret T [°C]"
+  tot_energy_mwh: "ST Tot Energy [MWh]"
+  tot_vol_l:      "ST Tot Vol [L]"
+
+# ASHP electrical energy
+ashp:
+  elec_cum_kwh: "ASHP Elec [kWh]"
+  elec_int_kwh: "ASHP Inst [kWh]"
+
+# Immersion heaters
+immersion:
+  total_cum_kwh: "Imm Tot [kWh]"
+  total_int_kwh: "Imm Tot Inst [kWh]"
+  backup_int_kwh: "Backup Imm Elec [kWh]"
+
+# PV proxy (not used for Stage-1 control; retained for completeness)
+pv_proxy:
+  inst_kw: "PV Inst [kW]"
+
+optional:
+  dt_coll_c: "dT_coll [C]"
+  pv_threshold: "PV Threshold"
+  ignore_columns:
+    - "Column1"
+    - "PV Max"
+    - "7.933760007"
+
+units:
+  temperature: "°C"
+  power: "kW"
+  energy: "kWh"
+  volume: "L"
+
+assumptions:
+  sampling_minutes: 30
+  st_use_as_measured: true
+  ambient_source: "column"   # use T_amb [C] (no separate weather file)
