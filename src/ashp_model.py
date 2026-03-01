@@ -1,0 +1,137 @@
+"""
+ASHP performance maps (control-oriented).
+
+Compact parametric relationships for capacity and electrical power
+as functions of ambient temperature and tank sink-proxy temperature.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+
+import numpy as np
+from scipy.optimize import least_squares
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ASHPParams:
+    """Identified ASHP map parameters.
+
+    Capacity  Q̇_cond = a0 + a1·T_amb + a2·T_sink + a3·T_amb·T_sink
+    Power     P_elec = b0 + b1·T_amb + b2·T_sink + b3·T_amb·T_sink
+    """
+    a: np.ndarray = field(default_factory=lambda: np.array([8.0, 0.1, -0.05, 0.0]))
+    b: np.ndarray = field(default_factory=lambda: np.array([3.0, -0.02, 0.03, 0.0]))
+
+
+def sink_proxy(
+    T_mid: np.ndarray,
+    T_top: np.ndarray,
+    w_mid: float = 0.5,
+    w_top: float = 0.5,
+) -> np.ndarray:
+    """Weighted average of mid and top node temperatures."""
+    return w_mid * np.asarray(T_mid) + w_top * np.asarray(T_top)
+
+
+def predict_capacity(T_amb: np.ndarray, T_sink: np.ndarray, p: ASHPParams) -> np.ndarray:
+    """Predict condenser heat output [kW]."""
+    a = p.a
+    T_a, T_s = np.asarray(T_amb, dtype=float), np.asarray(T_sink, dtype=float)
+    return np.maximum(a[0] + a[1] * T_a + a[2] * T_s + a[3] * T_a * T_s, 0.0)
+
+
+def predict_power(T_amb: np.ndarray, T_sink: np.ndarray, p: ASHPParams) -> np.ndarray:
+    """Predict electrical power [kW]."""
+    b = p.b
+    T_a, T_s = np.asarray(T_amb, dtype=float), np.asarray(T_sink, dtype=float)
+    return np.maximum(b[0] + b[1] * T_a + b[2] * T_s + b[3] * T_a * T_s, 0.1)
+
+
+def predict_cop(T_amb: np.ndarray, T_sink: np.ndarray, p: ASHPParams) -> np.ndarray:
+    """Return COP = Q̇_cond / P_elec."""
+    q = predict_capacity(T_amb, T_sink, p)
+    pel = predict_power(T_amb, T_sink, p)
+    return q / pel
+
+
+def fit_ashp_maps(
+    T_amb: np.ndarray,
+    T_sink: np.ndarray,
+    Q_meas_kwh: np.ndarray,
+    P_meas_kwh: np.ndarray,
+    dt_h: float = 0.5,
+) -> ASHPParams:
+    """Fit ASHP capacity and power maps from measured interval energies.
+
+    Parameters
+    ----------
+    T_amb, T_sink : ambient and sink-proxy arrays [°C].
+    Q_meas_kwh : measured condenser heat per interval [kWh] (may be unknown;
+                 pass NaN to skip capacity fitting – power only).
+    P_meas_kwh : measured ASHP electrical energy per interval [kWh].
+    dt_h : interval length in hours (default 0.5).
+
+    Returns
+    -------
+    ASHPParams with fitted coefficients.
+    """
+    T_a = np.asarray(T_amb, dtype=float)
+    T_s = np.asarray(T_sink, dtype=float)
+    P_meas = np.asarray(P_meas_kwh, dtype=float)
+
+    # Mask: only intervals where ASHP was running (P > small threshold)
+    mask = np.isfinite(P_meas) & (P_meas > 0.01) & np.isfinite(T_a) & np.isfinite(T_s)
+    T_a_f, T_s_f, P_f = T_a[mask], T_s[mask], P_meas[mask]
+
+    # Convert interval kWh → average kW
+    P_kw = P_f / dt_h
+
+    # Fit power map: P_elec = b0 + b1*T_a + b2*T_s + b3*T_a*T_s
+    X = np.column_stack([np.ones(len(T_a_f)), T_a_f, T_s_f, T_a_f * T_s_f])
+    b_init = np.array([3.0, -0.02, 0.03, 0.0])
+
+    def power_residuals(b):
+        pred = X @ b
+        pred = np.maximum(pred, 0.1)
+        return pred - P_kw
+
+    res_b = least_squares(
+        power_residuals, b_init,
+        bounds=([-np.inf, -np.inf, -np.inf, -np.inf],
+                [np.inf,  np.inf,  np.inf,  np.inf]),
+        loss="soft_l1",
+    )
+
+    params = ASHPParams()
+    params.b = res_b.x
+    logger.info("ASHP power map coefficients: %s", params.b)
+
+    # Capacity fit: if Q_meas available
+    Q_meas = np.asarray(Q_meas_kwh, dtype=float) if Q_meas_kwh is not None else np.full_like(P_meas, np.nan)
+    mask_q = mask & np.isfinite(Q_meas) & (Q_meas > 0.01)
+
+    if mask_q.sum() > 20:
+        T_a_q, T_s_q = T_a[mask_q], T_s[mask_q]
+        Q_kw = Q_meas[mask_q] / dt_h
+        Xq = np.column_stack([np.ones(len(T_a_q)), T_a_q, T_s_q, T_a_q * T_s_q])
+        a_init = np.array([8.0, 0.1, -0.05, 0.0])
+
+        def cap_residuals(a):
+            pred = Xq @ a
+            pred = np.maximum(pred, 0.0)
+            return pred - Q_kw
+
+        res_a = least_squares(cap_residuals, a_init, loss="soft_l1")
+        params.a = res_a.x
+        logger.info("ASHP capacity map coefficients: %s", params.a)
+    else:
+        # Estimate capacity from power × assumed COP
+        avg_cop = 3.0
+        params.a = params.b * avg_cop
+        logger.info("ASHP capacity estimated from power × COP=%.1f", avg_cop)
+
+    return params
