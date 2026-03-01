@@ -46,6 +46,7 @@ class TankParams:
     f_imm:   np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 0.2, 0.8]))
     mix_coeff: float = 0.01
     draw_ua: np.ndarray = field(default_factory=lambda: np.array([0.01, 0.005, 0.002, 0.001]))
+    T_mains: float = 10.0  # cold mains water temperature [°C]
 
     def to_vector(self) -> np.ndarray:
         """Flatten all parameters to a 1-D vector for optimisation."""
@@ -121,7 +122,7 @@ def tank_step(
     """
     T = np.array(T, dtype=float)
     T_new = T.copy()
-    T_mains = 10.0  # assumed cold mains temperature [°C]
+    T_mains = params.T_mains
 
     # Convert kWh → kJ for the interval
     Q_st_kj  = Q_st_kwh * 3600.0

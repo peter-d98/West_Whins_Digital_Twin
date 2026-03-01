@@ -17,6 +17,10 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+# Temperature sanity bounds [°C]
+TEMP_MIN = -10.0
+TEMP_MAX = 99.0
+
 # ---------------------------------------------------------------------------
 # Public helpers
 # ---------------------------------------------------------------------------
@@ -92,7 +96,7 @@ def load_and_clean(
     temp_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c", "t_amb_c"]
     for tc in temp_cols:
         if tc in df.columns:
-            bad = (df[tc] < -10) | (df[tc] > 99)
+            bad = (df[tc] < TEMP_MIN) | (df[tc] > TEMP_MAX)
             if bad.any():
                 logger.info("Clipping %d implausible values in %s.", bad.sum(), tc)
                 df.loc[bad, tc] = np.nan

@@ -15,6 +15,9 @@ from scipy.optimize import least_squares
 
 logger = logging.getLogger(__name__)
 
+# Percentile used to select near-full-load intervals for map fitting
+HIGH_LOAD_PERCENTILE = 75
+
 
 @dataclass
 class ASHPParams:
@@ -88,7 +91,7 @@ def fit_ashp_maps(
     # (not partial duty-cycle intervals).
     valid = np.isfinite(P_meas) & (P_meas > 0.05) & np.isfinite(T_a) & np.isfinite(T_s)
     if valid.sum() > 50:
-        p75 = np.percentile(P_meas[valid], 75)
+        p75 = np.percentile(P_meas[valid], HIGH_LOAD_PERCENTILE)
         mask = valid & (P_meas >= p75)
     else:
         mask = valid
