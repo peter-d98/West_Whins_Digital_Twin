@@ -67,7 +67,7 @@ def cop_errors(
 
     sub = df.loc[mask]
     T_sink = ashp_model.sink_proxy(sub["tank_mid_c"].values, sub["tank_top_c"].values)
-    P_pred = ashp_model.predict_power(sub["t_amb_c"].values, T_sink, ashp_p)
+    P_pred = ashp_model.predict_power(sub["t_out_c"].values, T_sink, ashp_p)
     P_pred_kwh = P_pred * dt_h
 
     P_meas = sub["ashp_inst_kwh"].values

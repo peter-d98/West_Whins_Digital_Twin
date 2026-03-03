@@ -29,10 +29,12 @@ These headers and cadence are consistent with the working dataset. Use `column_m
 
 ## Ambient usage
 
-Use **`T_amb [C]`** (plant‑room ambient) to:
-- compute tank UA losses per node;
-- feed ASHP performance maps as the ambient/source input for Stage‑1.  
-This column is an approximation (OAT + 10 °C) and can be refined later.
+| Column | Meaning | Used for |
+|---|---|---|
+| `t_amb_c` | Plant-room temperature proxy (≈ outdoor air + 10 °C) | Tank UA heat-loss calculations |
+| `t_out_c` | Estimated outdoor air temperature (`t_amb_c − 10.0`, derived by the loader) | ASHP performance mapping (capacity, power, COP) |
+
+`t_out_c` is added automatically by the data loader whenever `t_amb_c` is present.
 
 ## Minimal expectations from the loader
 

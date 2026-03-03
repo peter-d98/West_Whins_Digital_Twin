@@ -23,8 +23,10 @@ HIGH_LOAD_PERCENTILE = 75
 class ASHPParams:
     """Identified ASHP map parameters.
 
-    Capacity  Q̇_cond = a0 + a1·T_amb + a2·T_sink + a3·T_amb·T_sink
-    Power     P_elec = b0 + b1·T_amb + b2·T_sink + b3·T_amb·T_sink
+    Map input temperature is outdoor air temperature (T_out).
+
+    Capacity  Q̇_cond = a0 + a1·T_out + a2·T_sink + a3·T_out·T_sink
+    Power     P_elec = b0 + b1·T_out + b2·T_sink + b3·T_out·T_sink
     """
     a: np.ndarray = field(default_factory=lambda: np.array([8.0, 0.1, -0.05, 0.0]))
     b: np.ndarray = field(default_factory=lambda: np.array([3.0, -0.02, 0.03, 0.0]))
@@ -40,29 +42,29 @@ def sink_proxy(
     return w_mid * np.asarray(T_mid) + w_top * np.asarray(T_top)
 
 
-def predict_capacity(T_amb: np.ndarray, T_sink: np.ndarray, p: ASHPParams) -> np.ndarray:
+def predict_capacity(T_out: np.ndarray, T_sink: np.ndarray, p: ASHPParams) -> np.ndarray:
     """Predict condenser heat output [kW]."""
     a = p.a
-    T_a, T_s = np.asarray(T_amb, dtype=float), np.asarray(T_sink, dtype=float)
+    T_a, T_s = np.asarray(T_out, dtype=float), np.asarray(T_sink, dtype=float)
     return np.maximum(a[0] + a[1] * T_a + a[2] * T_s + a[3] * T_a * T_s, 0.0)
 
 
-def predict_power(T_amb: np.ndarray, T_sink: np.ndarray, p: ASHPParams) -> np.ndarray:
+def predict_power(T_out: np.ndarray, T_sink: np.ndarray, p: ASHPParams) -> np.ndarray:
     """Predict electrical power [kW]."""
     b = p.b
-    T_a, T_s = np.asarray(T_amb, dtype=float), np.asarray(T_sink, dtype=float)
+    T_a, T_s = np.asarray(T_out, dtype=float), np.asarray(T_sink, dtype=float)
     return np.maximum(b[0] + b[1] * T_a + b[2] * T_s + b[3] * T_a * T_s, 0.1)
 
 
-def predict_cop(T_amb: np.ndarray, T_sink: np.ndarray, p: ASHPParams) -> np.ndarray:
+def predict_cop(T_out: np.ndarray, T_sink: np.ndarray, p: ASHPParams) -> np.ndarray:
     """Return COP = Q̇_cond / P_elec."""
-    q = predict_capacity(T_amb, T_sink, p)
-    pel = predict_power(T_amb, T_sink, p)
+    q = predict_capacity(T_out, T_sink, p)
+    pel = predict_power(T_out, T_sink, p)
     return q / pel
 
 
 def fit_ashp_maps(
-    T_amb: np.ndarray,
+    T_out: np.ndarray,
     T_sink: np.ndarray,
     Q_meas_kwh: np.ndarray,
     P_meas_kwh: np.ndarray,
@@ -72,7 +74,7 @@ def fit_ashp_maps(
 
     Parameters
     ----------
-    T_amb, T_sink : ambient and sink-proxy arrays [°C].
+    T_out, T_sink : outdoor air temperature and sink-proxy arrays [°C].
     Q_meas_kwh : measured condenser heat per interval [kWh] (may be unknown;
                  pass NaN to skip capacity fitting – power only).
     P_meas_kwh : measured ASHP electrical energy per interval [kWh].
@@ -82,7 +84,7 @@ def fit_ashp_maps(
     -------
     ASHPParams with fitted coefficients.
     """
-    T_a = np.asarray(T_amb, dtype=float)
+    T_a = np.asarray(T_out, dtype=float)
     T_s = np.asarray(T_sink, dtype=float)
     P_meas = np.asarray(P_meas_kwh, dtype=float)
 
