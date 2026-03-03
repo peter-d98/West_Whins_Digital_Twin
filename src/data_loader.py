@@ -112,6 +112,12 @@ def load_and_clean(
     # ---- 9. Forward-fill tiny gaps (≤2 steps) then leave NaN --------------
     df = df.ffill(limit=2)
 
+    # ---- 10. Derive outdoor air temperature from plant-room proxy ----------
+    # t_out_c is estimated outdoor air temperature; the plant-room proxy
+    # (t_amb_c) runs approximately 10 °C above outdoor air temperature.
+    if "t_amb_c" in df.columns:
+        df["t_out_c"] = df["t_amb_c"] - 10.0
+
     logger.info("Cleaned DataFrame shape: %s, date range %s → %s",
                 df.shape, df.index.min(), df.index.max())
     return df

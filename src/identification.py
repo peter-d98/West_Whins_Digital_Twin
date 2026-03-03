@@ -47,7 +47,7 @@ def prepare_inputs(df: pd.DataFrame, ashp_p: ashp_model.ASHPParams, dt_h: float 
     # ASHP heat from map
     T_sink = ashp_model.sink_proxy(df["tank_mid_c"].values, df["tank_top_c"].values)
     # Use measured electrical × COP from map to derive heat delivered
-    cop = ashp_model.predict_cop(df["t_amb_c"].values, T_sink, ashp_p)
+    cop = ashp_model.predict_cop(df["t_out_c"].values, T_sink, ashp_p)
     P_meas = df["ashp_inst_kwh"].fillna(0).values
     Q_ashp = P_meas * cop  # kWh heat = kWh elec × COP
 
@@ -151,7 +151,7 @@ def run_identification(
         df_train["tank_top_c"].values,
     )
     ashp_p = ashp_model.fit_ashp_maps(
-        T_amb=df_train["t_amb_c"].values,
+        T_out=df_train["t_out_c"].values,
         T_sink=T_sink_train,
         Q_meas_kwh=None,   # no direct condenser measurement
         P_meas_kwh=df_train["ashp_inst_kwh"].values,
