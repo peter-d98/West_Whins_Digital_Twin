@@ -30,7 +30,8 @@ NODE_CAP  = NODE_MASS * CP  # kJ/K  (≈575.3)
 
 @dataclass
 class TankParams:
-    """Learnable parameters of the 4-node tank model.
+    """Contains all the learnable parameters of the grey-box model.
+    These are the parameters that will be optimised to fit the model to real data.
 
     UA_loss : per-node UA to ambient [kW/K] (4 values, bottom→top).
     UA_adj  : adjacent-node conductance [kW/K] (3 values: b-m, m-mh, mh-t).
@@ -38,7 +39,10 @@ class TankParams:
     f_ashp  : fraction of ASHP heat to each node (4 values).
     f_imm   : fraction of immersion heat to each node (4 values).
     mix_coeff : draw-induced mixing coefficient [kW/K].
+    draw_ua : per-node UA to cold mains water [kW/K] (4 values).
+    T_mains : cold mains water temperature [°C].
     """
+    #default values are physically informed intitial guesses
     UA_loss: np.ndarray = field(default_factory=lambda: np.array([0.003, 0.002, 0.002, 0.003]))
     UA_adj:  np.ndarray = field(default_factory=lambda: np.array([0.05, 0.05, 0.05]))
     f_st:    np.ndarray = field(default_factory=lambda: np.array([0.0, 0.3, 0.5, 0.2]))
@@ -62,6 +66,7 @@ class TankParams:
 
     @classmethod
     def from_vector(cls, v: np.ndarray) -> "TankParams":
+        """Reverses to_vector, reconstructs a TankParams instance with array slicing"""
         p = cls()
         p.UA_loss    = v[0:4]
         p.UA_adj     = v[4:7]
@@ -130,7 +135,7 @@ def tank_step(
     Q_imm_kj  = Q_imm_kwh * 3600.0
 
     for i in range(4):
-        # Heat input to this node [kJ]
+        # Heat input to this node [kJ] e.g. if f_st[3]=0.2, top node gets 20% of ST heat input
         dQ = (params.f_st[i] * Q_st_kj
               + params.f_ashp[i] * Q_ashp_kj
               + params.f_imm[i] * Q_imm_kj)
@@ -190,6 +195,7 @@ def simulate(
     T_hist = np.zeros((N + 1, 4))
     T_hist[0] = T0
 
+    # Each step feeds the output of the previous step(T_hist[k]) as the input to the next (T_hist[k+1]).
     for k in range(N):
         T_hist[k + 1] = tank_step(
             T_hist[k],

@@ -1,6 +1,13 @@
 """
 ASHP performance maps (control-oriented).
 
+A performance map is a compact mathematical equation that describes how the heat pump
+behaves without simulating its internal physics.
+
+Outputs: Q_cond (condenser heat output) and P_elec (electrical power input).
+Inputs: T_out (outdoor air temperature) and T_sink (tank sink-proxy temperature).  The sink-proxy is a weighted average
+of the mid and top node temperatures, representing the effective sink temperature seen by the ASHP.
+
 Compact parametric relationships for capacity and electrical power
 as functions of ambient temperature and tank sink-proxy temperature.
 """
@@ -15,13 +22,16 @@ from scipy.optimize import least_squares
 
 logger = logging.getLogger(__name__)
 
-# Percentile used to select near-full-load intervals for map fitting
+# This percentile is used later for filtering
+# This ensures the map is fitted to seady full-load operation, not partial or start-up which would distort results.
 HIGH_LOAD_PERCENTILE = 75
 
 
 @dataclass
 class ASHPParams:
     """Identified ASHP map parameters.
+    
+    Assume a bilinear form for both capacity and power maps:
 
     Map input temperature is outdoor air temperature (T_out).
 
@@ -71,6 +81,9 @@ def fit_ashp_maps(
     dt_h: float = 0.5,
 ) -> ASHPParams:
     """Fit ASHP capacity and power maps from measured interval energies.
+    Stage 1: Data Filtering
+    Stage 2: Power Map Fitting
+    Stage 3: Capacity Map Fitting
 
     Parameters
     ----------
@@ -91,7 +104,8 @@ def fit_ashp_maps(
     # Mask: only intervals where ASHP was running at substantial load.
     # Use a high percentile threshold so we fit steady-state power
     # (not partial duty-cycle intervals).
-    valid = np.isfinite(P_meas) & (P_meas > 0.05) & np.isfinite(T_a) & np.isfinite(T_s)
+    valid = np.isfinite(P_meas) & (P_meas > 0.05) & np.isfinite(T_a) & np.isfinite(T_s) # Removes intervals with NaN Temps or near-zero ASHP power
+    # If there are enough intervals (>50) we can apply high-load filter (>75%)
     if valid.sum() > 50:
         p75 = np.percentile(P_meas[valid], HIGH_LOAD_PERCENTILE)
         mask = valid & (P_meas >= p75)
@@ -105,21 +119,23 @@ def fit_ashp_maps(
     # Fit power map: P_elec = b0 + b1*T_a + b2*T_s + b3*T_a*T_s
     X = np.column_stack([np.ones(len(T_a_f)), T_a_f, T_s_f, T_a_f * T_s_f])
 
-    # Use OLS for a good initial guess, then refine with robust loss
+    # Use Ordinary Least Squares (OLS) for a good initial guess, then refine with robust loss
+    # OLS finds the b that minimises the sum of squared errors between X @ b (@ is matrix multiplication).
     b_ols, _, _, _ = np.linalg.lstsq(X, P_kw, rcond=None)
     b_lo = np.array([-20.0, -0.5, -0.5, -0.02])
     b_hi = np.array([20.0,   0.5,  0.5,  0.02])
-    b_init = np.clip(b_ols, b_lo + 1e-6, b_hi - 1e-6)
+    b_init = np.clip(b_ols, b_lo + 1e-6, b_hi - 1e-6) # ensure initial guess is within bounds for least_squares
 
     def power_residuals(b):
         pred = X @ b
-        pred = np.maximum(pred, 0.1)
+        pred = np.maximum(pred, 0.1) 
         return pred - P_kw
 
+    # 
     res_b = least_squares(
         power_residuals, b_init,
-        bounds=(b_lo, b_hi),
-        loss="soft_l1",
+        bounds=(b_lo, b_hi), # constrain to physically plausible values
+        loss="soft_l1", # less sensitive to outliers than squared loss
     )
 
     params = ASHPParams()
@@ -130,6 +146,8 @@ def fit_ashp_maps(
     Q_meas = np.asarray(Q_meas_kwh, dtype=float) if Q_meas_kwh is not None else np.full_like(P_meas, np.nan)
     mask_q = mask & np.isfinite(Q_meas) & (Q_meas > 0.01)
 
+    # If direct heat output measurements (Q_meas_kwh) are available and there are enough valid points (>20),
+    # the a coefficients are fitted directly from data — the preferred approach.
     if mask_q.sum() > 20:
         T_a_q, T_s_q = T_a[mask_q], T_s[mask_q]
         Q_kw = Q_meas[mask_q] / dt_h
@@ -144,6 +162,7 @@ def fit_ashp_maps(
         res_a = least_squares(cap_residuals, a_init, loss="soft_l1")
         params.a = res_a.x
         logger.info("ASHP capacity map coefficients: %s", params.a)
+    # Otherwise they're estimated from an assumed average COP
     else:
         # Estimate capacity from power × assumed COP
         avg_cop = 3.0

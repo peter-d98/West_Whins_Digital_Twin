@@ -6,16 +6,16 @@ cumulative-meter differencing, rollover repair, #N/A tokens,
 negative PV clipping, and 30-min grid alignment.
 """
 
-from __future__ import annotations
+from __future__ import annotations #allows | in type hints (Python 3.10+)
 
-import logging
+import logging # for logging info/warnings during loading and cleaning that doesn't display to the user
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import yaml
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) 
 
 # Temperature sanity bounds [°C]
 TEMP_MIN = -10.0
@@ -28,7 +28,7 @@ TEMP_MAX = 99.0
 def load_column_mapping(yaml_path: str | Path) -> dict:
     """Return the full mapping dictionary from *column_mapping.yaml*."""
     with open(yaml_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return yaml.safe_load(f) 
 
 
 def load_and_clean(
@@ -56,13 +56,15 @@ def load_and_clean(
     df = pd.read_csv(
         csv_path,
         na_values=["#N/A", "#N/A!", "#REF!", "N/A", ""],
-        encoding="utf-8-sig",          # handles BOM
+        encoding="utf-8-sig",          # handles BOM (quirk of Excel exports)
     )
-    logger.info("Raw CSV shape: %s", df.shape)
+    logger.info("Raw CSV shape: %s", df.shape) #records the shape of the raw CSV for debugging purposes
 
     # ---- 2. Parse time and set as index -----------------------------------
+    """ "time" column name and date format are looked up to ensure the code isn't hardcoded to a specific CSV structure.
+    Parses datetime objects with DD/MM/YYYY format and sets the time column as the index, sorted in chronological order. """
     time_col = cfg["time"]["name"]
-    time_fmt = cfg["time"]["format"]
+    time_fmt = cfg["time"]["format"] 
     df[time_col] = pd.to_datetime(df[time_col], format=time_fmt, dayfirst=True)
     df = df.set_index(time_col).sort_index()
     df.index.name = "time"
@@ -72,16 +74,17 @@ def load_and_clean(
     df = df.asfreq(freq)
 
     # ---- 3. Build canonical rename map ------------------------------------
-    rename_map = _build_rename_map(cfg)
+    rename_map = _build_rename_map(cfg) #helper function defined later in the file
     # Keep only columns present in the data
-    rename_map = {k: v for k, v in rename_map.items() if k in df.columns}
+    rename_map = {k: v for k, v in rename_map.items() if k in df.columns} 
     df = df.rename(columns=rename_map)
 
     # ---- 4. Convert to numeric (coerce leftovers) -------------------------
     for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        df[col] = pd.to_numeric(df[col], errors="coerce") #replaces non-numerics with NaN
 
     # ---- 5. Cumulative → interval differencing ----------------------------
+    #converts cumulative readings to instantaneous by differencing
     df = _diff_cumulative(df, "ashp_elec_cum_kwh", "ashp_inst_kwh")
     df = _diff_cumulative(df, "imm_tot_cum_kwh", "imm_tot_inst_kwh")
 
@@ -89,14 +92,14 @@ def load_and_clean(
     if "pv_inst_kw" in df.columns:
         neg_pv = df["pv_inst_kw"] < 0
         if neg_pv.any():
-            logger.info("Clipping %d negative PV values to 0.", neg_pv.sum())
+            logger.info("Clipping %d negative PV values to 0.", neg_pv.sum()) #records number of negative PV values being clipped
             df.loc[neg_pv, "pv_inst_kw"] = 0.0
 
     # ---- 7. Temperature sanity clipping -----------------------------------
     temp_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c", "t_amb_c"]
     for tc in temp_cols:
         if tc in df.columns:
-            bad = (df[tc] < TEMP_MIN) | (df[tc] > TEMP_MAX)
+            bad = (df[tc] < TEMP_MIN) | (df[tc] > TEMP_MAX) #creates boolean mask for implausible temperature values
             if bad.any():
                 logger.info("Clipping %d implausible values in %s.", bad.sum(), tc)
                 df.loc[bad, tc] = np.nan
@@ -128,6 +131,7 @@ def load_and_clean(
 # ---------------------------------------------------------------------------
 
 # Canonical name → YAML path tuples
+#leading _ indicates these are internal constants not to be accessed from outside this module
 _YAML_PATHS: list[tuple[str, list[str]]] = [
     ("t_amb_c",           ["ambient", "ambient_c"]),
     ("tank_bottom_c",     ["tank", "bottom_c"]),
@@ -150,7 +154,9 @@ _YAML_PATHS: list[tuple[str, list[str]]] = [
 
 
 def _build_rename_map(cfg: dict) -> dict[str, str]:
-    """Return ``{csv_header: canonical_name}`` from the YAML mapping."""
+    """Creates a dictionary that maps every raw CSV header to its
+      canonical name to be used in the rest of the project.
+    ``{csv_header: canonical_name}`` from the YAML mapping."""
     rename: dict[str, str] = {}
     for canon, keys in _YAML_PATHS:
         node = cfg
@@ -199,7 +205,8 @@ def _diff_cumulative(
 
 
 def node_ordering_check(df: pd.DataFrame) -> pd.Series:
-    """Return a boolean Series: True where T_top >= T_mh >= T_mid >= T_bot."""
+    """Not used inside load_and_clean but is available for use elsewhere in the codebade.
+    Return a boolean Series: True where T_top >= T_mh >= T_mid >= T_bot."""
     cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c"]
     if not all(c in df.columns for c in cols):
         return pd.Series(True, index=df.index)
