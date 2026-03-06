@@ -80,6 +80,63 @@ def cop_errors(
     }
 
 
+def ashp_performance_kpis(
+    df: pd.DataFrame,
+    ashp_p: ashp_model.ASHPParams,
+    dt_h: float = 0.5,
+) -> dict[str, float]:
+    """Compute ASHP performance KPIs over the evaluation period.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Cleaned DataFrame with ASHP, tank, and temperature columns.
+    ashp_p : ashp_model.ASHPParams
+        Fitted ASHP parameters.
+    dt_h : float
+        Interval length in hours (default 0.5).
+
+    Returns
+    -------
+    dict[str, float]
+        Keys: spf, mean_cop_on, frac_cop_above_3, ashp_runtime_frac.
+    """
+    nan_result = {
+        "spf": float("nan"),
+        "mean_cop_on": float("nan"),
+        "frac_cop_above_3": float("nan"),
+        "ashp_runtime_frac": float("nan"),
+    }
+
+    ashp_on = df["ashp_inst_kwh"].fillna(0) > 0.05
+    n_on = ashp_on.sum()
+    ashp_runtime_frac = float(n_on) / len(df) if len(df) > 0 else 0.0
+
+    if n_on < 10:
+        return nan_result
+
+    sub = df.loc[ashp_on]
+    T_sink = ashp_model.sink_proxy(sub["tank_mid_c"].values, sub["tank_top_c"].values)
+    cop = ashp_model.predict_cop(sub["t_out_c"].values, T_sink, ashp_p)
+
+    # Clip COP to plausible range
+    cop = np.clip(cop, 0.5, 8.0)
+
+    P_meas = sub["ashp_inst_kwh"].values
+    Q_pred = P_meas * cop  # predicted heat [kWh]
+
+    spf = float(np.nansum(Q_pred) / np.nansum(P_meas))
+    mean_cop_on = float(np.nanmean(cop))
+    frac_cop_above_3 = float(np.nanmean(cop >= 3.0))
+
+    return {
+        "spf": spf,
+        "mean_cop_on": mean_cop_on,
+        "frac_cop_above_3": frac_cop_above_3,
+        "ashp_runtime_frac": ashp_runtime_frac,
+    }
+
+
 def node_ordering_rate(T_sim: np.ndarray) -> float:
     """Fraction of steps where T_top >= T_mh >= T_mid >= T_bot (with 0.5 K tolerance)."""
     tol = 0.5
@@ -172,6 +229,7 @@ def evaluate(
 
     rmses = node_rmses(T_meas[1:], T_sim)
     cop_err = cop_errors(df, id_result.ashp_params)
+    ashp_kpis = ashp_performance_kpis(df, id_result.ashp_params)
     ordering = node_ordering_rate(T_sim)
     e_resid = energy_balance_residual(
         T_meas, inputs["Q_st"], inputs["Q_ashp"],
@@ -182,6 +240,7 @@ def evaluate(
         "label": label,
         "node_rmse": rmses,
         "cop_errors": cop_err,
+        "ashp_kpis": ashp_kpis,
         "ordering_rate": ordering,
         "energy_balance_residual_kwh": e_resid,
         "n_samples": len(df),
@@ -191,6 +250,8 @@ def evaluate(
     for name, val in rmses.items():
         logger.info("  RMSE %s: %.2f °C", name, val)
     logger.info("  COP median APE: %.1f %%", cop_err.get("median_ape", float("nan")))
+    logger.info("  SPF: %.2f", ashp_kpis.get("spf", float("nan")))
+    logger.info("  Fraction COP >= 3: %.1f %%", ashp_kpis.get("frac_cop_above_3", float("nan")) * 100)
     logger.info("  Ordering rate: %.1f %%", ordering * 100)
     logger.info("  Energy balance residual: %.1f kWh", e_resid)
 
