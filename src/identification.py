@@ -105,7 +105,7 @@ def back_calculate_ashp_heat(
             loss_sum += ua_loss_default[i] * (T[k - 1, i] - T_amb[k]) * dt_s
         T_avg /= 4.0
 
-        Q_kJ = NODE_CAP * dT_sum + loss_sum
+        Q_kJ = NODE_CAP * dT_sum + loss_sum  # kJ/K × K + kJ = kJ
         Q_back.iloc[k] = max(Q_kJ / 3600.0, 0.0)
 
     return Q_back

@@ -230,7 +230,12 @@ class TestIntegration:
         """Validation COP median APE should not worsen with the fix."""
         baseline = pipeline_runs["baseline"]
         fixed = pipeline_runs["fixed"]
-        assert fixed["val"]["cop_errors"]["median_ape"] <= baseline["val"]["cop_errors"]["median_ape"]
+        base_ape = baseline["val"]["cop_errors"]["median_ape"]
+        fixed_ape = fixed["val"]["cop_errors"]["median_ape"]
+        assert np.isfinite(base_ape) and np.isfinite(fixed_ape), (
+            f"APE values must be finite: baseline={base_ape}, fixed={fixed_ape}"
+        )
+        assert fixed_ape <= base_ape
 
     def test_tank_rmse_no_degradation(self, pipeline_runs):
         """No node RMSE should worsen by more than 10%."""
