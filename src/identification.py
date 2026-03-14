@@ -65,6 +65,7 @@ def back_calculate_ashp_heat(
     tank_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c"]
 
     ashp_on = df["ashp_inst_kwh"].fillna(0) > 0.05
+    hx_on = df["tank_top_c"].fillna(0).diff() > 0.05  # rising top temp indicates heat being delivered to DHW tank not SH
     imm_off = df["imm_tot_inst_kwh"].fillna(0) < 0.01
     st_low = df[st_col].fillna(0) < 0.05 if st_col in df.columns else pd.Series(True, index=df.index)
 
@@ -74,7 +75,7 @@ def back_calculate_ashp_heat(
     finite_prev = np.roll(finite_now, 1)
     finite_prev[0] = False  # first row has no predecessor
 
-    mask = ashp_on & imm_off & st_low & pd.Series(finite_now & finite_prev, index=df.index)
+    mask = ashp_on & hx_on & imm_off & st_low & pd.Series(finite_now & finite_prev, index=df.index)
 
     n_ashp_only = mask.sum()
     logger.info("ASHP-only intervals found: %d", n_ashp_only)

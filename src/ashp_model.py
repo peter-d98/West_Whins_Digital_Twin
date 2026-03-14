@@ -23,7 +23,7 @@ from scipy.optimize import least_squares
 logger = logging.getLogger(__name__)
 
 # This percentile is used later for filtering
-# This ensures the map is fitted to seady full-load operation, not partial or start-up which would distort results.
+# This ensures the map is fitted to steady full-load operation, not partial or start-up which would distort results.
 HIGH_LOAD_PERCENTILE = 75
 
 
@@ -159,6 +159,7 @@ def fit_ashp_maps(
             pred = np.maximum(pred, 0.0)
             return pred - Q_kw
 
+        logger.info("No. of valid data points used for capacity fitting: %d", mask_q.sum())
         res_a = least_squares(cap_residuals, a_init, loss="soft_l1")
         params.a = res_a.x
         logger.info("ASHP capacity map coefficients: %s", params.a)
