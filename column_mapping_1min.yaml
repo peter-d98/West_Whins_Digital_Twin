@@ -1,0 +1,70 @@
+# column_mapping_1min.yaml
+# Canonical → actual CSV header names for 1-minute resolution data.
+#
+# Key differences from column_mapping.yaml:
+#   - Time format includes seconds: %d/%m/%Y %H:%M:%S
+#   - sampling_minutes: 1
+#   - No ASHP Inst [kWh] interval column (elec_int_kwh: null)
+#   - T_out [C] maps directly to t_out_c; t_amb_c is derived as t_out_c + 10.0
+#   - Imm Elec [kWh] is DHW-only immersion cumulative (imm_tot_cum_kwh)
+#   - Backup Imm Elec [kWh] is backup immersion cumulative (backup_imm_cum_kwh)
+
+paths:
+  plant_csv: null       # set externally
+  tank_csv:  null       # set externally
+
+time:
+  name: "Time"
+  format: "%d/%m/%Y %H:%M:%S"   # includes seconds
+  timezone: "Europe/London"
+
+# No T_amb [C] column in 1-min data.
+# t_out_c is read from T_out [C] in the tank temperature CSV.
+# t_amb_c is derived as t_out_c + 10.0 in load_and_merge_1min.
+ambient:
+  ambient_c: null
+
+# Outdoor air temperature — present in the tank temperature CSV only
+outdoor_temp:
+  out_c: "T_out [C]"
+
+# 4-node tank temperatures — present in the tank temperature CSV only
+tank:
+  bottom_c: "Tank Bottom [°C]"
+  mid_c:    "Tank Mid [°C]"
+  mid_hi_c: "Tank Mid Hi [°C]"
+  top_c:    "Tank Top [°C]"
+
+# Solar-thermal energy and flow data — present in energy CSVs
+solar_thermal:
+  power_kw:       "ST Power [kW]"
+  flow_l:         "ST Flow [L]"
+  flow_temp_c:    "ST Flow T [°C]"
+  return_temp_c:  "ST Ret T [°C]"
+  tot_energy_mwh: "ST Tot Energy [MWh]"
+  tot_vol_l:      "ST Tot Vol [L]"
+
+# ASHP electrical energy — cumulative only in 1-min data
+ashp:
+  elec_cum_kwh: "ASHP Elec [kWh]"
+  elec_int_kwh: null    # no per-interval column; derived via .diff() in data_loader
+
+# Immersion heaters — both are cumulative in 1-min data
+immersion:
+  total_cum_kwh:  "Imm Elec [kWh]"         # DHW immersion (cumulative)
+  backup_cum_kwh: "Backup Imm Elec [kWh]"  # backup immersion (cumulative)
+
+# PV proxy
+pv_proxy:
+  inst_kw: "PV Inst [kW]"
+
+units:
+  temperature: "°C"
+  power: "kW"
+  energy: "kWh"
+  volume: "L"
+
+assumptions:
+  sampling_minutes: 1
+  st_use_as_measured: true
+  ambient_source: "t_out_column"   # t_amb_c = t_out_c + 10.0 (no T_amb [C] column)

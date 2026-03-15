@@ -156,6 +156,69 @@ def ashp_performance_kpis(
     }
 
 
+def compute_ashp_kpis(
+    df: pd.DataFrame,
+    ashp_p: ashp_model.ASHPParams,
+    dt_h: float = 0.5,
+) -> dict:
+    """Compute ASHP seasonal performance metrics.
+
+    Uses the COP map to estimate heat delivered, but only over intervals
+    where the ASHP was running (``ashp_inst_kwh > 0.05``).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Cleaned DataFrame with ASHP, tank, and temperature columns.
+    ashp_p : ashp_model.ASHPParams
+        Fitted ASHP parameters.
+    dt_h : float
+        Interval length in hours (default 0.5).
+
+    Returns
+    -------
+    dict
+        Keys:
+
+        - ``spf`` — seasonal performance factor = ΣQ_ashp / ΣP_elec
+        - ``mean_cop_on`` — mean predicted COP over on-intervals
+        - ``frac_cop_above_3`` — fraction of on-intervals with COP > 3
+        - ``ashp_runtime_frac`` — fraction of all intervals where ASHP was on
+        - ``n_samples`` — number of on-intervals used
+    """
+    ashp_on = df["ashp_inst_kwh"].fillna(0) > 0.05
+    n_on    = int(ashp_on.sum())
+    ashp_runtime_frac = float(n_on) / len(df) if len(df) > 0 else 0.0
+
+    nan_result = {
+        "spf": float("nan"),
+        "mean_cop_on": float("nan"),
+        "frac_cop_above_3": float("nan"),
+        "ashp_runtime_frac": ashp_runtime_frac,
+        "n_samples": n_on,
+    }
+
+    if n_on < 10:
+        return nan_result
+
+    sub     = df.loc[ashp_on]
+    T_sink  = ashp_model.sink_proxy(sub["tank_mid_c"].values, sub["tank_top_c"].values)
+    cop     = np.clip(
+        ashp_model.predict_cop(sub["t_out_c"].values, T_sink, ashp_p), 0.5, 8.0
+    )
+
+    P_meas = sub["ashp_inst_kwh"].values
+    Q_pred = P_meas * cop
+
+    return {
+        "spf":              float(np.nansum(Q_pred) / np.nansum(P_meas)),
+        "mean_cop_on":      float(np.nanmean(cop)),
+        "frac_cop_above_3": float(np.nanmean(cop >= 3.0)),
+        "ashp_runtime_frac": ashp_runtime_frac,
+        "n_samples":        n_on,
+    }
+
+
 def node_ordering_rate(T_sim: np.ndarray) -> float:
     """Fraction of steps where T_top >= T_mh >= T_mid >= T_bot (with 0.5 K tolerance)."""
     tol = 0.5
@@ -255,9 +318,9 @@ def evaluate(
     if Q_back is None:
         Q_back = identification.back_calculate_ashp_heat(df)
 
-    rmses = node_rmses(T_meas[1:], T_sim)
-    cop_err = cop_errors(df, id_result.ashp_params, Q_back=Q_back)
-    ashp_kpis = ashp_performance_kpis(df, id_result.ashp_params)
+    rmses    = node_rmses(T_meas[1:], T_sim)
+    cop_err  = cop_errors(df, id_result.ashp_params, Q_back=Q_back)
+    ashp_kpis = compute_ashp_kpis(df, id_result.ashp_params)
     ordering = node_ordering_rate(T_sim)
     e_resid = energy_balance_residual(
         T_meas, inputs["Q_st"], inputs["Q_ashp"],

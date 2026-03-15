@@ -38,6 +38,7 @@ def main(
     output_dir: Path | None = None,
     train_frac: float = 0.7,
     max_nfev: int = 300,
+    ashp_params_path: Path | None = None,
 ) -> dict:
     csv_path  = csv_path  or ROOT / "data" / "FullDS_Findhorn.csv"
     yaml_path = yaml_path or ROOT / "column_mapping.yaml"
@@ -61,6 +62,7 @@ def main(
     logger.info("Running identification (train_frac=%.2f) …", train_frac)
     id_result, df_train, df_val = identification.run_identification(
         df, train_frac=train_frac, max_nfev=max_nfev,
+        ashp_params_path=ashp_params_path,
     )
 
     # ---- Save parameters --------------------------------------------------
@@ -126,5 +128,12 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--train-frac", type=float, default=0.7)
     parser.add_argument("--max-nfev", type=int, default=300)
+    parser.add_argument(
+        "--ashp-params", type=Path, default=None,
+        help="Path to pre-fitted ASHP parameters JSON (e.g. output/params_ashp.json "
+             "from run_ashp_1min.py).  When supplied, ASHP map fitting is skipped "
+             "and these parameters are used directly for tank identification.",
+    )
     args = parser.parse_args()
-    main(args.csv, args.yaml, args.output, args.train_frac, args.max_nfev)
+    main(args.csv, args.yaml, args.output, args.train_frac, args.max_nfev,
+         args.ashp_params)

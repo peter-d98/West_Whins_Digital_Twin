@@ -96,7 +96,8 @@ def load_and_clean(
             df.loc[neg_pv, "pv_inst_kw"] = 0.0
 
     # ---- 7. Temperature sanity clipping -----------------------------------
-    temp_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c", "t_amb_c"]
+    temp_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c",
+                 "t_amb_c", "t_out_c"]
     for tc in temp_cols:
         if tc in df.columns:
             bad = (df[tc] < TEMP_MIN) | (df[tc] > TEMP_MAX) #creates boolean mask for implausible temperature values
@@ -126,6 +127,111 @@ def load_and_clean(
     return df
 
 
+def load_and_merge_1min(
+    energy_paths: list,
+    tank_path: str | Path,
+    yaml_path: str | Path,
+) -> pd.DataFrame:
+    """Load and merge 1-minute energy and tank-temperature CSV files.
+
+    Two separate groups of CSVs exist at 1-minute resolution:
+
+    * **Energy CSVs** (may be multiple to cover different date ranges) — contain
+      ASHP cumulative electricity, immersion cumulative electricity, solar-thermal
+      flow/power and PV data.  There is no ``T_amb`` column; outdoor air
+      temperature comes from the tank file.
+
+    * **Tank temperature CSV** — contains the four stratified-tank node
+      temperatures plus ``T_out [°C]`` (real outdoor air, forward-filled from
+      30-min data).
+
+    The function:
+
+    1. Loads each energy CSV via :func:`load_and_clean`, then concatenates
+       them dropping duplicate timestamps.
+    2. Loads the tank CSV via :func:`load_and_clean`.
+    3. Merges energy + tank on the time index (inner join, then forward-fills
+       gaps ≤ 2 steps).
+    4. Derives ``t_amb_c = t_out_c + 10.0`` (reverse of the 30-min derivation).
+    5. Derives ``imm_tot_inst_kwh`` as the sum of differenced
+       ``imm_tot_cum_kwh`` (DHW immersion) and differenced
+       ``backup_imm_cum_kwh`` (backup immersion).
+    6. Returns a cleaned DataFrame at 1-minute resolution.
+
+    Parameters
+    ----------
+    energy_paths : list of paths to the 1-minute energy CSV files.
+    tank_path : path to the 1-minute tank temperature CSV file.
+    yaml_path : path to ``column_mapping_1min.yaml``.
+
+    Returns
+    -------
+    pd.DataFrame with a ``DatetimeIndex`` named ``time`` at 1-minute cadence.
+    """
+    cfg = load_column_mapping(yaml_path)
+    sampling_minutes = cfg.get("assumptions", {}).get("sampling_minutes", 1)
+
+    # ---- 1. Load and concatenate energy CSVs ------------------------------
+    energy_dfs = []
+    for ep in energy_paths:
+        df_e = load_and_clean(ep, yaml_path, sampling_minutes=sampling_minutes)
+        energy_dfs.append(df_e)
+        logger.info("Energy CSV loaded: %s (%d rows)", ep, len(df_e))
+
+    if not energy_dfs:
+        raise ValueError("No energy CSV paths provided to load_and_merge_1min.")
+
+    df_energy = pd.concat(energy_dfs).sort_index()
+    # Drop duplicate timestamps (overlapping date ranges between files)
+    df_energy = df_energy[~df_energy.index.duplicated(keep="first")]
+    logger.info("Concatenated energy data: %d rows (%s → %s)",
+                len(df_energy), df_energy.index.min(), df_energy.index.max())
+
+    # ---- 2. Load tank temperature CSV ------------------------------------
+    df_tank = load_and_clean(tank_path, yaml_path, sampling_minutes=sampling_minutes)
+    logger.info("Tank CSV loaded: %d rows (%s → %s)",
+                len(df_tank), df_tank.index.min(), df_tank.index.max())
+
+    # ---- 3. Inner-join energy + tank on time index -----------------------
+    tank_cols = [c for c in
+                 ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c", "t_out_c"]
+                 if c in df_tank.columns]
+    df = df_energy.join(df_tank[tank_cols], how="inner")
+    logger.info("After inner join: %d rows", len(df))
+
+    # Forward-fill small gaps (≤2 steps)
+    df = df.ffill(limit=2)
+
+    # ---- 4. Derive plant-room ambient from outdoor air -------------------
+    if "t_out_c" in df.columns:
+        df["t_amb_c"] = df["t_out_c"] + 10.0
+        logger.info("Derived t_amb_c = t_out_c + 10.0")
+    else:
+        logger.warning("t_out_c not found after merge; t_amb_c will be missing.")
+
+    # ---- 5. Combine DHW and backup immersion into total interval kWh -----
+    # imm_tot_inst_kwh was derived from imm_tot_cum_kwh by load_and_clean (DHW only).
+    # backup_imm_cum_kwh is the cumulative backup immersion — difference it here
+    # and add to the total.
+    if "backup_imm_cum_kwh" in df.columns:
+        backup_inst = df["backup_imm_cum_kwh"].diff()
+        # Negative diffs indicate either meter rollover or a data gap at the
+        # merge boundary (inner join may drop rows between files).  Treat both
+        # as missing data to avoid spurious energy spikes.
+        backup_inst = backup_inst.where(backup_inst >= 0, np.nan)
+        if "imm_tot_inst_kwh" in df.columns:
+            df["imm_tot_inst_kwh"] = (
+                df["imm_tot_inst_kwh"].fillna(0) + backup_inst.fillna(0)
+            )
+        else:
+            df["imm_tot_inst_kwh"] = backup_inst.fillna(0)
+        logger.info("Combined DHW + backup immersion into imm_tot_inst_kwh")
+
+    logger.info("Merged 1-min DataFrame: %d rows, %s → %s",
+                len(df), df.index.min(), df.index.max())
+    return df
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -134,6 +240,7 @@ def load_and_clean(
 #leading _ indicates these are internal constants not to be accessed from outside this module
 _YAML_PATHS: list[tuple[str, list[str]]] = [
     ("t_amb_c",           ["ambient", "ambient_c"]),
+    ("t_out_c",           ["outdoor_temp", "out_c"]),
     ("tank_bottom_c",     ["tank", "bottom_c"]),
     ("tank_mid_c",        ["tank", "mid_c"]),
     ("tank_mid_hi_c",     ["tank", "mid_hi_c"]),
@@ -149,6 +256,7 @@ _YAML_PATHS: list[tuple[str, list[str]]] = [
     ("imm_tot_cum_kwh",   ["immersion", "total_cum_kwh"]),
     ("imm_tot_inst_kwh",  ["immersion", "total_int_kwh"]),
     ("backup_imm_kwh",    ["immersion", "backup_int_kwh"]),
+    ("backup_imm_cum_kwh",["immersion", "backup_cum_kwh"]),
     ("pv_inst_kw",        ["pv_proxy", "inst_kw"]),
 ]
 
