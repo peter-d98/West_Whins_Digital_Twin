@@ -23,9 +23,9 @@ These headers and cadence are consistent with the working dataset. Use `column_m
 ## Data
 Place the following files in the data/ directory before running:
 - FullDS_Findhorn.csv (30-minute dataset)
-- 1min_2023_2024.csv (1-minute energy data, 2023-2024)
-- 1min_2025.csv (1-minute energy data, 2025)
-- 1min_tank_temps.csv (1-minute tank temperatures + T_out)
+- Data_WestWhins_2023_2024_1min.csv (1-minute energy data, 2023-2024)
+- Data_WestWhins_2025_final_1min.csv (1-minute energy data, 2025)
+- Data_WestWhins_TankT__with_T_out_1min.csv (1-minute tank temperatures + T_out)
 
 ## Known quirks to handle
 
