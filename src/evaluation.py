@@ -191,6 +191,9 @@ def energy_balance_residual(
     for i in range(4):
         avg_dT = np.nanmean(T_meas[:, i] - T_amb)
         E_loss += params.UA_loss[i] * avg_dT * dt_s * len(T_amb) / 3600.0
+        # include draw losses
+        avg_dT_draw = np.nanmean(T_meas[:, i] - params.T_mains)
+        E_loss += params.draw_ua[i] * avg_dT_draw * dt_s * len(T_amb) / 3600.0
 
     residual = E_in - E_stored - E_loss
     return float(residual)
