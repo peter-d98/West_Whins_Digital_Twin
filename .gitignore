@@ -208,3 +208,6 @@ __marimo__/
 
 # Stage-1 outputs
 output/
+
+# Data csvs
+data/

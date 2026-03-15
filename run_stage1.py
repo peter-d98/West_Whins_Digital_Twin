@@ -39,7 +39,7 @@ def main(
     train_frac: float = 0.7,
     max_nfev: int = 300,
 ) -> dict:
-    csv_path  = csv_path  or ROOT / "FullDS_Findhorn.csv"
+    csv_path  = csv_path  or ROOT / "data" / "FullDS_Findhorn.csv"
     yaml_path = yaml_path or ROOT / "column_mapping.yaml"
     output_dir = output_dir or ROOT / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
