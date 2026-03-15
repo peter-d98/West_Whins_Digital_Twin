@@ -70,6 +70,16 @@ def load_and_clean(
     df.index.name = "time"
 
     # Align to expected grid
+    # Drop duplicate timestamps before calling asfreq — duplicates occur in
+    # 1-minute (and 30-minute) UK data at DST transitions when clocks go back
+    # and naive timestamps repeat (e.g. 01:00–01:59 appears twice in October).
+    n_dup = df.index.duplicated().sum()
+    if n_dup:
+        logger.warning(
+            "Dropping %d duplicate timestamps (likely DST clock-back artefacts).",
+            n_dup,
+        )
+        df = df[~df.index.duplicated(keep="first")]
     freq = f"{sampling_minutes}min"
     df = df.asfreq(freq)
 
