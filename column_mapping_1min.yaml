@@ -26,7 +26,7 @@ ambient:
 
 # Outdoor air temperature — present in the tank temperature CSV only
 outdoor_temp:
-  out_c: "T_out [C]"
+  out_c: "T_out [°C]"
 
 # 4-node tank temperatures — present in the tank temperature CSV only
 tank:

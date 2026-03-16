@@ -65,9 +65,30 @@ def load_and_clean(
     Parses datetime objects with DD/MM/YYYY format and sets the time column as the index, sorted in chronological order. """
     time_col = cfg["time"]["name"]
     time_fmt = cfg["time"]["format"] 
-    df[time_col] = pd.to_datetime(df[time_col], format=time_fmt, dayfirst=True)
+
+    try:
+        df[time_col] = pd.to_datetime(df[time_col], format=time_fmt, dayfirst=True)
+    except ValueError:
+        logger.warning(
+        "Time format '%s' failed, retrying with format='mixed'. "
+        "This is expected for 1-minute CSVs with inconsistent HH:MM vs HH:MM:SS.",
+        time_fmt,
+    )
+        df[time_col] = pd.to_datetime(df[time_col], format="mixed", dayfirst=True)
+        
     df = df.set_index(time_col).sort_index()
     df.index.name = "time"
+    
+    # Drop duplicate timestamps (DST rollback or mixed format artefacts)
+    n_before = len(df)
+    df = df[~df.index.duplicated(keep="first")]
+    n_dupes = n_before - len(df)
+    if n_dupes > 0:
+        logger.warning(
+        "Dropped %d duplicate timestamps (likely DST rollback or mixed "
+        "HH:MM/HH:MM:SS format artefacts).",
+        n_dupes,
+    )
 
     # Align to expected grid
     freq = f"{sampling_minutes}min"

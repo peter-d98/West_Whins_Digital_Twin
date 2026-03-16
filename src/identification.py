@@ -83,7 +83,7 @@ def compute_ashp_runs_1min(
     dt_s = 60.0
 
     ashp_on  = df["ashp_inst_kwh"].fillna(0) > 0.005
-    hx_on    = df["tank_top_c"].fillna(0).diff() > 0.02
+    #hx_on    = df["tank_top_c"].fillna(0).diff() > 0.02
     imm_off  = df["imm_tot_inst_kwh"].fillna(0) < 0.001
     st_low   = (
         df[st_col].fillna(0) < 0.002
@@ -97,7 +97,7 @@ def compute_ashp_runs_1min(
     finite_prev[0] = False
 
     mask = (
-        ashp_on & hx_on & imm_off & st_low
+        ashp_on & imm_off & st_low
         & pd.Series(finite_now & finite_prev, index=df.index)
     )
 
@@ -128,13 +128,25 @@ def compute_ashp_runs_1min(
 
     logger.info("Total candidate runs ≥ %d min: %d", min_run_minutes, len(run_pairs))
 
+    MIN_DTOP_RUN_C = 0.3  # °C rise in T_top over full run required
+
     records = []
     end_timestamps = []
+    n_skipped_dtop = 0  # counter for logging
     for k_start, k_end in run_pairs:
         # k_start == 0 should never happen (finite_prev[0] = False ensures it),
         # but guard explicitly to avoid accessing T[-1] on unexpected data.
         if k_start == 0:
             logger.warning("Run starting at index 0 skipped (no predecessor row).")
+            continue
+
+        dT_top = T[k_end, 3] - T[k_start - 1, 3]   # index 3 = tank_top_c
+        if dT_top < MIN_DTOP_RUN_C:
+            n_skipped_dtop += 1
+            logger.debug(
+                "Run [%d:%d] skipped: T_top rose only %.3f°C (< %.2f°C threshold)",
+                k_start, k_end, dT_top, MIN_DTOP_RUN_C,
+            )
             continue
 
         n = k_end - k_start + 1
@@ -169,6 +181,11 @@ def compute_ashp_runs_1min(
             "T_sink_c":   t_sink_c,
         })
         end_timestamps.append(end_ts)
+
+    logger.info(
+        "Runs after T_top filter: %d kept, %d skipped (T_top rise < %.2f°C)",
+        len(records), n_skipped_dtop, MIN_DTOP_RUN_C,
+    )
 
     if not records:
         return pd.DataFrame(
