@@ -79,6 +79,7 @@ def fit_ashp_maps(
     Q_meas_kwh: np.ndarray,
     P_meas_kwh: np.ndarray,
     dt_h: float = 0.5,
+    apply_high_load_filter: bool = False,
 ) -> ASHPParams:
     """Fit ASHP capacity and power maps from measured interval energies.
     Stage 1: Data Filtering
@@ -105,8 +106,9 @@ def fit_ashp_maps(
     # Use a high percentile threshold so we fit steady-state power
     # (not partial duty-cycle intervals).
     valid = np.isfinite(P_meas) & (P_meas > 0.05) & np.isfinite(T_a) & np.isfinite(T_s) # Removes intervals with NaN Temps or near-zero ASHP power
+    
     # If there are enough intervals (>50) we can apply high-load filter (>75%)
-    if valid.sum() > 50:
+    if apply_high_load_filter and valid.sum() > 50:
         p75 = np.percentile(P_meas[valid], HIGH_LOAD_PERCENTILE)
         mask = valid & (P_meas >= p75)
     else:

@@ -14,7 +14,11 @@ import pandas as pd
 import pytest
 
 from src import ashp_model, evaluation
-from src.identification import back_calculate_ashp_heat, run_identification
+from src.identification import (
+    back_calculate_ashp_heat,
+    compute_ashp_runs_1min,
+    run_identification,
+)
 from src.tank_model import NODE_CAP
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -136,6 +140,38 @@ class TestBackCalculateASHPHeat:
 
         # First row always NaN (no predecessor)
         assert pd.isna(Q.iloc[0])
+
+    def test_1min_rejects_runs_with_large_top_drop(self):
+        """1-min run selector should reject runs where tank top cools strongly."""
+        idx = pd.date_range("2024-01-01", periods=26, freq="1min")
+
+        df = pd.DataFrame(
+            {
+                "tank_bottom_c": np.full(26, 30.0),
+                "tank_mid_c": np.full(26, 40.0),
+                "tank_mid_hi_c": np.full(26, 45.0),
+                # Top drops by 1.0 C over the run: should be rejected by default
+                "tank_top_c": np.linspace(55.0, 54.0, 26),
+                "ashp_inst_kwh": np.full(26, 0.06),   # 2-min rolling sum ~= 0.12 (> 0.10)
+                "imm_tot_inst_kwh": np.zeros(26),
+                "st_kwh": np.zeros(26),
+                "t_amb_c": np.full(26, 15.0),
+                "t_out_c": np.full(26, 8.0),
+            },
+            index=idx,
+        )
+
+        runs_default = compute_ashp_runs_1min(df, min_run_minutes=15)
+        assert len(runs_default) == 0, "Run with dTop=-1.0 C should be rejected by default"
+
+        runs_relaxed = compute_ashp_runs_1min(
+            df,
+            min_run_minutes=15,
+            min_dtop_run_c=-1.5,
+            min_dtsum_run_c=-10.0,
+            min_warming_nodes=0,
+        )
+        assert len(runs_relaxed) == 1, "Run should pass when dTop threshold is relaxed"
 
 
 # ---------------------------------------------------------------------------

@@ -374,3 +374,22 @@ def _plot_nodes(
     fig.savefig(plot_dir / f"nodes_{label}.png", dpi=150)
     plt.close(fig)
     logger.info("Saved node plot to %s", plot_dir / f"nodes_{label}.png")
+
+    # Save plotting data to CSV
+    df_plot = pd.DataFrame(
+        index=time_idx,
+        data={
+            f"{name}_measured": T_meas[:, i] for i, name in enumerate(NODE_NAMES)
+        } | {
+            f"{name}_simulated": T_sim[:, i] for i, name in enumerate(NODE_NAMES)
+        }
+    )
+    df_plot.index.name = "time"
+    if label.lower() == "train":
+        csv_name = "nodes_train.csv"
+    elif label.lower() == "validation":
+        csv_name = "nodes_validation.csv"
+    else:
+        csv_name = f"nodes_{label}.csv"
+    df_plot.to_csv(plot_dir / csv_name)
+    logger.info("Saved node plot data to %s", plot_dir / csv_name)

@@ -40,14 +40,17 @@ class IdentificationResult:
 def compute_ashp_runs_1min(
     df: pd.DataFrame,
     st_col: str = "st_kwh",
-    min_run_minutes: int = 15,
+    min_run_minutes: int = 10,
+    min_dtop_run_c: float = 0.5,
+    min_dtsum_run_c: float = 2.0,
+    min_warming_nodes: int = 2,
 ) -> pd.DataFrame:
     """Find qualifying ASHP-only DHW runs in 1-minute resolution data.
 
     An interval is considered ASHP-only DHW if:
-      - ``ashp_inst_kwh > 0.005`` (ASHP running at 1-min scale)
-      - ``tank_top_c.diff() > 0.02`` (top node temperature rising)
-      - ``imm_tot_inst_kwh < 0.001`` (immersion heater off)
+            - 2-minute rolling ASHP electricity ``ashp_inst_kwh`` sum > 0.10 kWh
+                (to reduce meter quantisation artefacts)
+            - ``imm_tot_inst_kwh < 0.05`` (immersion heater off)
       - solar-thermal energy is negligible (``st_col < 0.002``)
       - all four tank temperatures are finite at this row and the previous row
 
@@ -71,20 +74,31 @@ def compute_ashp_runs_1min(
     st_col : str
         Name of the solar-thermal energy column (default ``"st_kwh"``).
     min_run_minutes : int
-        Minimum consecutive qualifying minutes to form a valid run (default 15).
+        Minimum consecutive qualifying minutes to form a valid run (default 10).
+    min_dtop_run_c : float
+        Minimum required top-node temperature rise over the full run
+        (``T_top[end] - T_top[start-1]``). Enforces bulk-charge behavior.
+    min_dtsum_run_c : float
+        Minimum net sum of node temperature rises over the run
+        (``sum(T[end] - T[start-1])``). Helps reject setpoint-maintenance and
+        mixed non-DHW runs with little net tank charging.
+    min_warming_nodes : int
+        Minimum number of tank nodes that must show positive net temperature
+        rise over the run.
 
     Returns
     -------
     pd.DataFrame
         One row per qualifying run, indexed by run-end timestamp.
-        Columns: ``Q_kwh``, ``P_kwh``, ``n_minutes``, ``T_out_c``, ``T_sink_c``.
+        Columns: ``Q_kwh``, ``P_kwh``, ``n_minutes``, ``T_out_c``, ``T_sink_c``,
+        ``dtop_run_c``.
     """
     tank_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c"]
     dt_s = 60.0
 
-    ashp_on  = df["ashp_inst_kwh"].fillna(0) > 0.005
-    #hx_on    = df["tank_top_c"].fillna(0).diff() > 0.02
-    imm_off  = df["imm_tot_inst_kwh"].fillna(0) < 0.001
+    ashp_2min_kwh = df["ashp_inst_kwh"].fillna(0).rolling(2, min_periods=1).sum()
+    ashp_on  = ashp_2min_kwh > 0.10   # 2-min rolling sum > 0.10 kWh ≈ > 3 kW active charging
+    imm_off  = df["imm_tot_inst_kwh"].fillna(0) < 0.05  # clear margin above immersion-on level (~0.10 kWh/min)
     st_low   = (
         df[st_col].fillna(0) < 0.002
         if st_col in df.columns
@@ -128,31 +142,40 @@ def compute_ashp_runs_1min(
 
     logger.info("Total candidate runs ≥ %d min: %d", min_run_minutes, len(run_pairs))
 
-    MIN_DTOP_RUN_C = 0.3  # °C rise in T_top over full run required
-
+    
+    rejected_dtop = 0
+    rejected_dtsum = 0
+    rejected_nodes = 0
     records = []
     end_timestamps = []
-    n_skipped_dtop = 0  # counter for logging
+
     for k_start, k_end in run_pairs:
         # k_start == 0 should never happen (finite_prev[0] = False ensures it),
         # but guard explicitly to avoid accessing T[-1] on unexpected data.
         if k_start == 0:
             logger.warning("Run starting at index 0 skipped (no predecessor row).")
             continue
-
-        dT_top = T[k_end, 3] - T[k_start - 1, 3]   # index 3 = tank_top_c
-        if dT_top < MIN_DTOP_RUN_C:
-            n_skipped_dtop += 1
-            logger.debug(
-                "Run [%d:%d] skipped: T_top rose only %.3f°C (< %.2f°C threshold)",
-                k_start, k_end, dT_top, MIN_DTOP_RUN_C,
-            )
-            continue
-
+            
         n = k_end - k_start + 1
 
+        # Run-level thermal-quality guards for bulk-charge behavior.
+        dT_nodes = T[k_end, :] - T[k_start - 1, :]
+        dtop_run_c = float(dT_nodes[3])
+        dtsum_run_c = float(np.sum(dT_nodes))
+        n_warming_nodes = int(np.sum(dT_nodes > 0.0))
+
+        if dtop_run_c < min_dtop_run_c:
+            rejected_dtop += 1
+            continue
+        if dtsum_run_c < min_dtsum_run_c:
+            rejected_dtsum += 1
+            continue
+        if n_warming_nodes < min_warming_nodes:
+            rejected_nodes += 1
+            continue
+
         # Energy balance: T change over full run (pre-run state = T[k_start-1])
-        dT_sum = float(sum(T[k_end, i] - T[k_start - 1, i] for i in range(4)))
+        dT_sum = dtsum_run_c
 
         # Standing losses over run
         loss_kJ = 0.0
@@ -179,17 +202,35 @@ def compute_ashp_runs_1min(
             "n_minutes":  n,
             "T_out_c":    t_out_c,
             "T_sink_c":   t_sink_c,
+            "dtop_run_c": dtop_run_c,
+            "dtsum_run_c": dtsum_run_c,
+            "n_warming_nodes": n_warming_nodes,
         })
         end_timestamps.append(end_ts)
 
     logger.info(
-        "Runs after T_top filter: %d kept, %d skipped (T_top rise < %.2f°C)",
-        len(records), n_skipped_dtop, MIN_DTOP_RUN_C,
+        "Qualifying runs after run-level filters: %d (rejected dTop<%.2fC: %d, dTsum<%.2fC: %d, warming_nodes<%d: %d)",
+        len(records),
+        min_dtop_run_c,
+        rejected_dtop,
+        min_dtsum_run_c,
+        rejected_dtsum,
+        min_warming_nodes,
+        rejected_nodes,
     )
 
     if not records:
         return pd.DataFrame(
-            columns=["Q_kwh", "P_kwh", "n_minutes", "T_out_c", "T_sink_c"]
+            columns=[
+                "Q_kwh",
+                "P_kwh",
+                "n_minutes",
+                "T_out_c",
+                "T_sink_c",
+                "dtop_run_c",
+                "dtsum_run_c",
+                "n_warming_nodes",
+            ]
         )
 
     result = pd.DataFrame(records, index=end_timestamps)

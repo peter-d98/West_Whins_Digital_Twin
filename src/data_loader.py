@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 TEMP_MIN = -10.0
 TEMP_MAX = 99.0
 
+# Conservative physical bounds for interval-energy clipping.
+# These remove obvious timestamp/reset artefacts after cumulative differencing.
+ASHP_POWER_MAX_KW = 20.0
+IMM_POWER_MAX_KW = 150.0
+
 # ---------------------------------------------------------------------------
 # Public helpers
 # ---------------------------------------------------------------------------
@@ -143,6 +148,31 @@ def load_and_clean(
             if neg.any():
                 logger.info("Clipping %d negative values in %s.", neg.sum(), ec)
                 df.loc[neg, ec] = 0.0
+
+    # Physical upper bounds for interval energies (kWh per interval)
+    if "ashp_inst_kwh" in df.columns:
+        ashp_kwh_max = ASHP_POWER_MAX_KW * sampling_minutes / 60.0
+        too_high = df["ashp_inst_kwh"] > ashp_kwh_max
+        if too_high.any():
+            logger.warning(
+                "Clipping %d implausible ASHP interval-energy values (> %.3f kWh/%dmin).",
+                too_high.sum(),
+                ashp_kwh_max,
+                sampling_minutes,
+            )
+            df.loc[too_high, "ashp_inst_kwh"] = 0.0
+
+    if "imm_tot_inst_kwh" in df.columns:
+        imm_kwh_max = IMM_POWER_MAX_KW * sampling_minutes / 60.0
+        too_high = df["imm_tot_inst_kwh"] > imm_kwh_max
+        if too_high.any():
+            logger.warning(
+                "Clipping %d implausible immersion interval-energy values (> %.3f kWh/%dmin).",
+                too_high.sum(),
+                imm_kwh_max,
+                sampling_minutes,
+            )
+            df.loc[too_high, "imm_tot_inst_kwh"] = 0.0
 
     # ---- 9. Forward-fill tiny gaps (≤2 steps) then leave NaN --------------
     df = df.ffill(limit=2)

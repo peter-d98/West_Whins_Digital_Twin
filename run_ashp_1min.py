@@ -58,7 +58,7 @@ def main(
     tank_path: Path | None = None,
     yaml_path: Path | None = None,
     output_dir: Path | None = None,
-    min_run_minutes: int = 15,
+    min_run_minutes: int = 10,
 ) -> dict:
     """Identify ASHP performance maps from 1-minute data and save results.
 
@@ -80,7 +80,7 @@ def main(
         Directory for output files.  Default: ``output/``.
     min_run_minutes : int
         Minimum consecutive qualifying minutes to form a valid DHW run
-        (default 15).
+        (default 10).
 
     Returns
     -------
@@ -166,12 +166,16 @@ def main(
     q_kw_avg  = runs_df["Q_kwh"].values / dt_h_runs
     p_kw_avg  = runs_df["P_kwh"].values / dt_h_runs
 
+    n_cap_runs = int(len(runs_df))
+    q_for_fit = q_kw_avg
+
     ashp_p = ashp_model.fit_ashp_maps(
         T_out=runs_df["T_out_c"].values,
         T_sink=runs_df["T_sink_c"].values,
-        Q_meas_kwh=q_kw_avg,
+        Q_meas_kwh=q_for_fit,
         P_meas_kwh=p_kw_avg,
         dt_h=1.0,
+        apply_high_load_filter=False, # Not applying high-load filter to run-aggregated data since runs should already be DHW-only
     )
 
     # ---- 5. Log map predictions at reference points -----------------------
@@ -193,6 +197,7 @@ def main(
         },
         "identification": {
             "n_runs":                int(len(runs_df)),
+            "n_runs_capacity_fit":   n_cap_runs,
             "run_length_median_min": round(run_len_median, 1),
             "mean_back_cop":         round(mean_back_cop, 3),
             "median_back_cop":       round(median_back_cop, 3),
@@ -239,9 +244,9 @@ if __name__ == "__main__":
         help="Output directory (default: output/).",
     )
     parser.add_argument(
-        "--min-run-minutes", type=int, default=15,
+        "--min-run-minutes", type=int, default=10,
         metavar="N",
-        help="Minimum consecutive DHW-only minutes to form a valid run (default: 15).",
+        help="Minimum consecutive DHW-only minutes to form a valid run (default: 10).",
     )
     args = parser.parse_args()
     main(
