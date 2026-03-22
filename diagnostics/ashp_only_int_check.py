@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from . import data_loader
-from .tank_model import NODE_CAP, TankParams
+from ..src import data_loader
+from ..src.tank_model import NODE_CAP, TankParams
 
 ROOT = Path(__file__).resolve().parent.parent
 

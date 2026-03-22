@@ -333,7 +333,7 @@ def _back_calc_30min(
     df: pd.DataFrame,
     st_col: str = "st_kwh",
     dt_s: float = 1800.0,
-    ashp_on_threshold: float = 0.05,
+    ashp_on_threshold: float = 0.1,
 ) -> pd.Series:
     """30-minute mode: per-interval back-calculation (original logic)."""
     tank_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c"]

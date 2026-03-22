@@ -13,7 +13,8 @@ time:
 
 # Ambient (plant room) temperature used for tank losses and ASHP maps
 ambient:
-  ambient_c: "T_amb [C]"   # added column (OAT + 10 °C approximation)
+  ambient_c: "T_amb [C]" # added column (OAT + 10 °C approximation)
+  out_c: "T_out [C]"   
 
 # 4-node tank temperatures
 tank:
