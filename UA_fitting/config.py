@@ -65,7 +65,7 @@ class UAConfig:
     min_idle_intervals: int = 2    # minimum consecutive intervals (2 × 30 min = 60 min)
 
     # --- draw detection -----------------------------------------------------
-    draw_delta_c: float = -1.5     # °C per interval (bottom node)
+    draw_delta_c: float = -1.0     # °C per interval (bottom node)
 
     # --- fitting ------------------------------------------------------------
     min_idle_windows: int = 20     # minimum usable windows

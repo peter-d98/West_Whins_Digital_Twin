@@ -116,7 +116,7 @@ def fit_ua(
             cond_mix = _inter_node_energy(T_cur, baseline_params, dt_s)  # (4,) kJ
 
             # Residual = measured change minus conduction/mixing contribution
-            residual = dE_meas   # (4,) kJ
+            residual = dE_meas   # (4,) kJ # conduction/mixing effects were ignored (let them be absorbed by UA)
 
             # Predictor for ambient loss:
             #   loss_kJ_i = UA_i * (T_i - T_amb) * dt_s
