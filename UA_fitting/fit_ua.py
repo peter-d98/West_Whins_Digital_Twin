@@ -13,6 +13,9 @@ The inter-node conduction and mixing terms depend on other TankParams that
 are kept at their defaults.  We therefore define the *net energy change not
 explained by inter-node exchange* and attribute it to ambient loss:
 
+***EDIT: this version does not subtract inter-node conduction or mixing, it allows these effects
+to be absorbed by the ua_loss parameters (sometimes leading to negative results)***
+
     residual_kJ_i[t] = NODE_CAP · dT_i[t]  -  (conduction + mixing)_i[t]
 
 The ambient-loss predictor for node i is:
