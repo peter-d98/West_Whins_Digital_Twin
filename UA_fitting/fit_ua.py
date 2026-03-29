@@ -31,9 +31,9 @@ negative UA values (which indicate net energy gain from mixing or model bias).
 
 Units
 -----
-- NODE_CAP : kJ/K  (≈575.3 from tank_model)
-- dt_s     : seconds (1800 for 30-min)
-- UA_loss  : kW/K  (the product UA·dt_s gives kJ/K, matching NODE_CAP·dT)
+- NODE_CAP_UA : array [kJ/K], shape (4,), bottom→top
+- dt_s        : seconds (1800 for 30-min)
+- UA_loss  : kW/K  (the product UA·dt_s gives kJ/K, matching NODE_CAP_UA·dT)
 - Temperatures : °C (differences are in K)
 
 Output
@@ -55,7 +55,22 @@ from UA_fitting.config import UAConfig
 from UA_fitting.detector import IdleWindow
 
 # Import tank constants (read-only, no src code changes)
-from src.tank_model import NODE_CAP, TankParams
+from src.tank_model import TankParams
+
+# ---------------------------------------------------------------------------
+# Per-node thermal capacities matching the physical tank geometry
+# ---------------------------------------------------------------------------
+# Bottom node : 170 L
+# Mid, Mid-Hi, Top : 380 L split equally → 126.67 L each
+# NODE_CAP_i = volume_i [L] × RHO [kg/L] × CP [kJ/(kg·K)]
+_RHO = 1.0          # kg/L  (water density)
+_CP  = 4.186        # kJ/(kg·K)
+NODE_CAP_UA = np.array([
+    170.0          * _RHO * _CP,   # bottom  → 711.62 kJ/K
+    (380.0 / 3.0)  * _RHO * _CP,   # mid     → 530.21 kJ/K
+    (380.0 / 3.0)  * _RHO * _CP,   # mid-hi  → 530.21 kJ/K
+    (380.0 / 3.0)  * _RHO * _CP,   # top     → 530.21 kJ/K
+])  # shape (4,), kJ/K, bottom→top
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +127,7 @@ def fit_ua(
             T_amb = w.T_amb[t]         # scalar [°C]
 
             # Measured energy change per node [kJ]
-            dE_meas = NODE_CAP * (T_nxt - T_cur)   # (4,)
+            dE_meas = NODE_CAP_UA * (T_nxt - T_cur)   # (4,)
 
             # Inter-node conduction and mixing at current T using baseline params.
             # These are the terms we subtract to isolate the ambient-loss signal.
@@ -180,7 +195,7 @@ def fit_ua(
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "units": "kW/K (per node, bottom→top)",
-            "node_cap_kj_per_k": round(NODE_CAP, 2),
+            "node_cap_kj_per_k": [round(float(v), 2) for v in NODE_CAP_UA],
             "dt_s": dt_s,
         },
     }
