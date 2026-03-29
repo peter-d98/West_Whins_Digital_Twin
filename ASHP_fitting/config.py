@@ -31,6 +31,8 @@ class ASHPFitConfig:
         Solar-thermal is OFF when ``st_kwh <= st_off_kwh`` [kWh].
     imm_off_kwh : float
         Immersion is OFF when ``imm_tot_inst_kwh <= imm_off_kwh`` [kWh].
+    sh_off_c : float
+        SH is considered OFF when change in top-node temp > sh_off [°C] per interval.
     draw_delta_c : float
         Maximum allowed drop in ``tank_bottom_c`` between consecutive samples
         to NOT flag a draw event [°C].  Default -1.0 (a drop > 1 °C is a draw).
@@ -58,6 +60,7 @@ class ASHPFitConfig:
     ashp_off_kwh: float = 0.013     # kWh per interval — below = ASHP off
     st_off_kwh: float = 0.05        # kWh per interval — below = ST off
     imm_off_kwh: float = 0.01       # kWh per interval — below = immersion off
+    sh_off_c: float = 1.0           # °C per interval — above = SH off
 
     # --- draw detection -----------------------------------------------------
     draw_delta_c: float = -1.0      # °C per interval (bottom node)

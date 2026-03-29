@@ -212,5 +212,5 @@ output/
 # Data csvs
 data/
 
-# UA_fitting csvs
-UA_fitting/diagnostics/idle_windows.csv
+# Diagnostic folders
+diagnostics/

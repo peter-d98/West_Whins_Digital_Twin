@@ -105,6 +105,7 @@ def detect_ashp_windows(
     ashp_on = df_train["ashp_inst_kwh"].fillna(0.0) > cfg.ashp_off_kwh
     st_off = df_train[_ST_COL].fillna(0.0) <= cfg.st_off_kwh
     imm_off = df_train["imm_tot_inst_kwh"].fillna(0.0) <= cfg.imm_off_kwh
+    hx_on = df_train["tank_top_c"].diff().fillna(0.0) > cfg.sh_off_c
 
     logger.info(
         "ASHP-on intervals: %d / %d (%.1f%%)",
@@ -129,7 +130,7 @@ def detect_ashp_windows(
     logger.info("Draw events in training data: %d", is_draw.sum())
 
     # -- Step 5: Combine into per-interval accepted mask ---------------------
-    accepted = ashp_on & st_off & imm_off & ~has_nan & has_finite_pair & ~is_draw
+    accepted = ashp_on & st_off & imm_off & hx_on & ~has_nan & has_finite_pair & ~is_draw
 
     # -- Step 6: Build per-interval diagnostics DataFrame --------------------
     diag = pd.DataFrame({
@@ -137,6 +138,7 @@ def detect_ashp_windows(
         "ashp_on": ashp_on.values,
         "st_off": st_off.values,
         "imm_off": imm_off.values,
+        "hx_on": hx_on.values,
         "no_nan": (~has_nan).values,
         "finite_pair": has_finite_pair.values,
         "no_draw": (~is_draw).values,
@@ -155,6 +157,8 @@ def detect_ashp_windows(
             reasons.append("st_on")
         elif not row["imm_off"]:
             reasons.append("imm_on")
+        elif not row["hx_on"]:
+            reasons.append("hx_off")
         elif not row["no_nan"]:
             reasons.append("has_nan")
         elif not row["finite_pair"]:

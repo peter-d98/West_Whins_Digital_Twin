@@ -13,22 +13,25 @@ Back-calculation physics
 ------------------------
 For each accepted ASHP-only interval *k*:
 
-    Q_ashp_kJ = NODE_CAP × Σ_i (T_i[k] − T_i[k−1])
+    Q_ashp_kJ = Σ_i NODE_CAP_i × (T_i[k] − T_i[k−1])
                 + Σ_i UA_loss_i × (T_i[k−1] − T_amb[k]) × dt_s
 
     Q_ashp_kWh = Q_ashp_kJ / 3600
 
-This mirrors the logic in ``src.identification._back_calc_30min`` but uses
-UA_loss priors from the dedicated ``UA_fitting`` module rather than
-``TankParams`` defaults.
+NODE_CAP is per-node here (not the uniform value from tank_model) because
+the ASHP HX draws from the mid node and returns to the top node — the bottom
+node is not directly charged.  The tank geometry used here is:
+  - Bottom node : 170 L  (NODE_CAP = 711.62 kJ/K)
+  - Mid, Mid-Hi, Top : 380 L split equally → 126.67 L each
+                       (NODE_CAP = 530.21 kJ/K each)
 
 Units
 -----
-- NODE_CAP : kJ/K (≈575.3 from tank_model)
-- dt_s     : seconds (1800 for 30-min)
-- UA_loss  : kW/K — so UA_loss × ΔT × dt_s gives kJ
-- Q_ashp   : kWh per interval
-- P_meas   : kWh per interval (measured ASHP electricity)
+- NODE_CAP_ASHP : array [kJ/K], shape (4,), bottom→top
+- dt_s          : seconds (1800 for 30-min)
+- UA_loss       : kW/K — so UA_loss × ΔT × dt_s gives kJ
+- Q_ashp        : kWh per interval
+- P_meas        : kWh per interval (measured ASHP electricity)
 """
 
 from __future__ import annotations
@@ -52,9 +55,26 @@ from src.ashp_model import (
     predict_cop,
     sink_proxy,
 )
-from src.tank_model import NODE_CAP # NOTE: In reality this value is different because ASHP only heats top 380L of tank.
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Per-node thermal capacities for this ASHP fitting pipeline
+# ---------------------------------------------------------------------------
+# The ASHP HX draws from the mid node and returns heated water to the top
+# node, so the bottom node is never directly charged.  The physical geometry
+# differs from the equal-split assumed by src.tank_model.NODE_CAP:
+#   Bottom node : 170 L
+#   Mid, Mid-Hi, Top : 380 L split equally → 126.67 L each
+# NODE_CAP_i = volume_i [L] × RHO [kg/L] × CP [kJ/(kg·K)]
+_RHO = 1.0          # kg/L  (water density)
+_CP  = 4.186        # kJ/(kg·K)
+NODE_CAP_ASHP = np.array([
+    170.0          * _RHO * _CP,   # bottom  → 711.62 kJ/K
+    (380.0 / 3.0)  * _RHO * _CP,   # mid     → 530.21 kJ/K
+    (380.0 / 3.0)  * _RHO * _CP,   # mid-hi  → 530.21 kJ/K
+    (380.0 / 3.0)  * _RHO * _CP,   # top     → 530.21 kJ/K
+])  # shape (4,), kJ/K, bottom→top
 
 
 # ---------------------------------------------------------------------------
@@ -100,14 +120,18 @@ def back_calculate_q_ashp(
     records = []
     for w in windows:
         for k in w.indices:
-            # k is a positional (iloc) index; k-1 is the previous interval
-            dT_sum = 0.0
+            # k is a positional (iloc) index; k-1 is the previous interval.
+            # Only nodes 1–3 (mid, mid-hi, top) are included: the bottom node
+            # is never directly charged by the ASHP HX circuit, its temperature
+            # rise during charging is conduction-driven, and its fitted UA_loss
+            # is negative (mixing artefact) — all of which inflate Q if included.
+            storage_kJ = 0.0
             loss_sum = 0.0
-            for i in range(4):
-                dT_sum += T[k, i] - T[k - 1, i]
+            for i in range(1, 4):
+                storage_kJ += NODE_CAP_ASHP[i] * (T[k, i] - T[k - 1, i])
                 loss_sum += ua_loss[i] * (T[k - 1, i] - T_amb[k]) * dt_s
 
-            Q_kJ = NODE_CAP * dT_sum + loss_sum
+            Q_kJ = storage_kJ + loss_sum
             Q_kwh = Q_kJ / 3600.0
 
             t_sink = float(sink_proxy(T[k, 1], T[k, 3]))  # mid, top
@@ -213,8 +237,17 @@ def fit_ashp(
         )[0])
         ref_cops[f"cop_at_{label}"] = round(cop_val, 3)
 
-    # Back-calculated COP statistics
+    # Back-calculated COP statistics.
+    # Arithmetic mean is sensitive to a small number of intervals where P_meas
+    # is just above the ASHP-on threshold (e.g. 0.015 kWh in a 30-min slot
+    # where the ASHP ran only briefly), producing physically implausible COPs.
+    # mean_back_cop is therefore computed after capping at _COP_REPORT_CAP;
+    # the cap is documented in the output and n_cop_outliers records how many
+    # intervals were excluded from the mean (they remain in the fit data).
+    _COP_REPORT_CAP = 8.0
     cop_back = bc_pos["Q_back_kwh"] / bc_pos["P_meas_kwh"].clip(lower=1e-3)
+    n_cop_outliers = int((cop_back > _COP_REPORT_CAP).sum())
+    mean_cop_capped = round(float(cop_back.clip(upper=_COP_REPORT_CAP).mean()), 3)
 
     # -- Step 6: Build result dictionary -------------------------------------
     result = {
@@ -227,13 +260,16 @@ def fit_ashp(
             "n_intervals_q_positive": n_pos,
             "n_intervals_q_rejected": n_rejected_q,
             "n_windows": len(windows),
-            "mean_back_cop": round(float(cop_back.mean()), 3),
+            "mean_back_cop": mean_cop_capped,
+            "mean_back_cop_cap": _COP_REPORT_CAP,
+            "n_cop_outliers": n_cop_outliers,
             "median_back_cop": round(float(cop_back.median()), 3),
             **ref_cops,
             "thresholds": {
                 "ashp_off_kwh": cfg.ashp_off_kwh,
                 "st_off_kwh": cfg.st_off_kwh,
                 "imm_off_kwh": cfg.imm_off_kwh,
+                "hx_on_c": cfg.sh_off_c,
                 "draw_delta_c": cfg.draw_delta_c,
                 "min_ashp_intervals": cfg.min_ashp_intervals,
                 "apply_high_load_filter": cfg.apply_high_load_filter,
