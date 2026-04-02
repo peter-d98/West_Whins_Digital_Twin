@@ -175,7 +175,10 @@ def compute_ashp_runs_1min(
             continue
 
         # Energy balance: T change over full run (pre-run state = T[k_start-1])
-        dT_sum = dtsum_run_c
+        # Storage term: per-node capacity × per-node temperature change
+        storage_kJ = 0.0
+        for i in range(4):
+            storage_kJ += NODE_CAP[i] * dT_nodes[i]
 
         # Standing losses over run
         loss_kJ = 0.0
@@ -183,7 +186,7 @@ def compute_ashp_runs_1min(
             for i in range(4):
                 loss_kJ += ua_loss_default[i] * (T[k, i] - T_amb[k]) * dt_s
 
-        Q_kJ  = NODE_CAP * dT_sum + loss_kJ
+        Q_kJ  = storage_kJ + loss_kJ
         Q_kwh = max(Q_kJ / 3600.0, 0.0)
 
         P_kwh = float(df["ashp_inst_kwh"].iloc[k_start: k_end + 1].sum())
@@ -372,13 +375,13 @@ def _back_calc_30min(
 
     idx = np.where(mask.values)[0]
     for k in idx:
-        dT_sum   = 0.0
-        loss_sum = 0.0
+        storage_kJ = 0.0
+        loss_sum   = 0.0
         for i in range(4):
-            dT_sum   += T[k, i] - T[k - 1, i]
-            loss_sum += ua_loss_default[i] * (T[k - 1, i] - T_amb[k]) * dt_s
+            storage_kJ += NODE_CAP[i] * (T[k, i] - T[k - 1, i])
+            loss_sum   += ua_loss_default[i] * (T[k - 1, i] - T_amb[k]) * dt_s
 
-        Q_kJ = NODE_CAP * dT_sum + loss_sum
+        Q_kJ = storage_kJ + loss_sum
         Q_back.iloc[k] = max(Q_kJ / 3600.0, 0.0)
 
     return Q_back

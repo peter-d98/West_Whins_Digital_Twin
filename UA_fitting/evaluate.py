@@ -66,10 +66,7 @@ def _simulate_idle(
     """
     params = TankParams()
     params.UA_loss = np.array(ua_loss, dtype=float)
-    # Zero out draw terms (no draws in idle windows)
-    params.draw_ua = np.zeros(4)
-    # Zero out inter-node conduction and mixing (UA should account for these already)
-    params.mix_coeff = 0 
+    # Zero out inter-node conduction (UA should account for these already)
     params.UA_adj = np.zeros(3)
     
     n = window.n_intervals

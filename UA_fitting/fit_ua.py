@@ -221,9 +221,9 @@ def _inter_node_energy(
     params: TankParams,
     dt_s: float,
 ) -> np.ndarray:
-    """Compute the inter-node conduction + mixing energy contribution [kJ].
+    """Compute the inter-node conduction energy contribution [kJ].
 
-    This mirrors the conduction and mixing terms from ``tank_model.tank_step``
+    This mirrors the conduction terms from ``tank_model.tank_step``
     but returns the contribution as an array of (4,) energy values [kJ].
 
     During idle periods we assume no draw, so draw-related terms are zero.
@@ -236,11 +236,5 @@ def _inter_node_energy(
         if i < 3:
             cond += params.UA_adj[i] * (T[i + 1] - T[i]) * dt_s
 
-        mix = 0.0
-        if i > 0:
-            mix += params.mix_coeff * (T[i - 1] - T[i]) * dt_s
-        if i < 3:
-            mix += params.mix_coeff * (T[i + 1] - T[i]) * dt_s
-
-        energy[i] = cond + mix
+        energy[i] = cond
     return energy

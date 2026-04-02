@@ -244,7 +244,7 @@ def energy_balance_residual(
     """
     # Stored energy change
     dT = T_meas[-1] - T_meas[0]  # shape (4,)
-    E_stored = np.sum(dT) * tank_model.NODE_CAP / 3600.0  # kJ→kWh
+    E_stored = np.sum(dT * tank_model.NODE_CAP) / 3600.0  # kJ→kWh
 
     E_in = np.nansum(Q_st) + np.nansum(Q_ashp) + np.nansum(Q_imm)
 
@@ -254,9 +254,6 @@ def energy_balance_residual(
     for i in range(4):
         avg_dT = np.nanmean(T_meas[:, i] - T_amb)
         E_loss += params.UA_loss[i] * avg_dT * dt_s * len(T_amb) / 3600.0
-        # include draw losses
-        avg_dT_draw = np.nanmean(T_meas[:, i] - params.T_mains)
-        E_loss += params.draw_ua[i] * avg_dT_draw * dt_s * len(T_amb) / 3600.0
 
     residual = E_in - E_stored - E_loss
     return float(residual)

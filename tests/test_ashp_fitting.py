@@ -45,12 +45,14 @@ def _make_synthetic_df(
     dt = pd.Timedelta(minutes=sampling_minutes)
     times = pd.date_range("2024-01-01", periods=n_intervals, freq=dt)
 
-    # Gently rising temperatures (ASHP charging pattern)
+    # Rising temperatures at >1 °C/step so mid_rising gate passes for all
+    # intervals (detector now uses mid-node, not top-node).
+    rise = np.arange(n_intervals) * 1.5
     base_temps = {
-        "tank_bottom_c": np.linspace(30.0, 35.0, n_intervals),
-        "tank_mid_c": np.linspace(40.0, 45.0, n_intervals),
-        "tank_mid_hi_c": np.linspace(48.0, 53.0, n_intervals),
-        "tank_top_c": np.linspace(52.0, 57.0, n_intervals),
+        "tank_bottom_c": 30.0 + rise,
+        "tank_mid_c":    40.0 + rise,
+        "tank_mid_hi_c": 48.0 + rise,
+        "tank_top_c":    52.0 + rise,
     }
 
     df = pd.DataFrame({

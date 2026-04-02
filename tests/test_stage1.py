@@ -206,7 +206,7 @@ class TestTankModel:
         p2 = TankParams.from_vector(v)
         np.testing.assert_array_equal(p.UA_loss, p2.UA_loss)
         np.testing.assert_array_equal(p.UA_adj, p2.UA_adj)
-        assert p.mix_coeff == p2.mix_coeff
+        np.testing.assert_array_equal(p.f_st, p2.f_st)
 
 
 # ---------------------------------------------------------------------------

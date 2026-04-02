@@ -180,8 +180,11 @@ def load_and_clean(
     # ---- 10. Derive outdoor air temperature from plant-room proxy ----------
     # t_out_c is estimated outdoor air temperature; the plant-room proxy
     # (t_amb_c) runs approximately 10 °C above outdoor air temperature.
+    # We recover t_out_c from the CSV column, then recompute t_amb_c using a
+    # corrected offset of 3 °C (the tank sits in an unheated outdoor shed).
     if "t_amb_c" in df.columns:
         df["t_out_c"] = df["t_amb_c"] - 10.0
+        df["t_amb_c"] = df["t_out_c"] + 3.0
 
     logger.info("Cleaned DataFrame shape: %s, date range %s → %s",
                 df.shape, df.index.min(), df.index.max())
@@ -213,7 +216,7 @@ def load_and_merge_1min(
     2. Loads the tank CSV via :func:`load_and_clean`.
     3. Merges energy + tank on the time index (inner join, then forward-fills
        gaps ≤ 2 steps).
-    4. Derives ``t_amb_c = t_out_c + 10.0`` (reverse of the 30-min derivation).
+    4. Derives ``t_amb_c = t_out_c + 3.0`` (corrected shed offset — unheated outdoor shed).
     5. Derives ``imm_tot_inst_kwh`` as the sum of differenced
        ``imm_tot_cum_kwh`` (DHW immersion) and differenced
        ``backup_imm_cum_kwh`` (backup immersion).
@@ -265,8 +268,8 @@ def load_and_merge_1min(
 
     # ---- 4. Derive plant-room ambient from outdoor air -------------------
     if "t_out_c" in df.columns:
-        df["t_amb_c"] = df["t_out_c"] + 10.0
-        logger.info("Derived t_amb_c = t_out_c + 10.0")
+        df["t_amb_c"] = df["t_out_c"] + 3.0
+        logger.info("Derived t_amb_c = t_out_c + 3.0")
     else:
         logger.warning("t_out_c not found after merge; t_amb_c will be missing.")
 
