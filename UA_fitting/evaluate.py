@@ -46,17 +46,19 @@ _NODE_COLOURS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 def _simulate_idle(
     window: IdleWindow,
     ua_loss: np.ndarray,
+    ua_adj: np.ndarray,
     dt_s: float,
 ) -> np.ndarray:
     """Simulate standing-loss-only evolution for one idle window.
 
-    Uses the fitted UA_loss values; all heat inputs set to zero, inter-node
-    conduction and mixing use TankParams defaults (same baseline as fitting).
+    Uses the jointly-fitted UA_loss and UA_adj values; all heat inputs are
+    set to zero.
 
     Parameters
     ----------
     window : IdleWindow
     ua_loss : array of 4 UA_loss values [kW/K].
+    ua_adj : array of 3 inter-node conductance values [kW/K].
     dt_s : time-step in seconds.
 
     Returns
@@ -66,8 +68,7 @@ def _simulate_idle(
     """
     params = TankParams()
     params.UA_loss = np.array(ua_loss, dtype=float)
-    # Zero out inter-node conduction (UA should account for these already)
-    params.UA_adj = np.zeros(3)
+    params.UA_adj  = np.array(ua_adj,  dtype=float)
     
     n = window.n_intervals
     T_pred = np.zeros((n, 4))
@@ -101,6 +102,7 @@ def write_qc_csv(
     ua_loss: np.ndarray,
     cfg: Optional[UAConfig] = None,
     *,
+    ua_adj: Optional[np.ndarray] = None,
     output_path: Optional[Path] = None,
 ) -> pd.DataFrame:
     """Produce a QC summary CSV with per-window residual metrics.
@@ -108,8 +110,9 @@ def write_qc_csv(
     Parameters
     ----------
     windows : list[IdleWindow]
-    ua_loss : array of 4 UA_loss values.
+    ua_loss : array of 4 UA_loss values [kW/K].
     cfg : UAConfig
+    ua_adj : array of 3 UA_adj values [kW/K].  Defaults to zeros.
     output_path : Path, optional — if given, CSV is written to disk.
 
     Returns
@@ -120,12 +123,14 @@ def write_qc_csv(
     """
     if cfg is None:
         cfg = UAConfig()
+    if ua_adj is None:
+        ua_adj = np.zeros(3)
 
     dt_s = cfg.sampling_minutes * 60.0
     rows = []
 
     for w in windows:
-        T_pred = _simulate_idle(w, ua_loss, dt_s)
+        T_pred = _simulate_idle(w, ua_loss, ua_adj, dt_s)
         rmse = _compute_rmse(w.T_nodes, T_pred)
         mean_resid = np.mean(w.T_nodes - T_pred, axis=0)
 
@@ -187,6 +192,7 @@ def plot_qc(
         cfg = UAConfig()
 
     ua_loss = np.array(ua_fit["UA_loss"])
+    ua_adj  = np.array(ua_fit.get("UA_adj", [0.0, 0.0, 0.0]))
     dt_s = cfg.sampling_minutes * 60.0
 
     # -- Select summer windows -----------------------------------------------
@@ -214,7 +220,7 @@ def plot_qc(
     saved_paths: List[Path] = []
 
     for w in selected:
-        T_pred = _simulate_idle(w, ua_loss, dt_s)
+        T_pred = _simulate_idle(w, ua_loss, ua_adj, dt_s)
         rmse = _compute_rmse(w.T_nodes, T_pred)
 
         # Build a time axis for x-ticks
@@ -272,7 +278,7 @@ def plot_qc(
     if selected:
         all_rmse = []
         for w in selected:
-            T_p = _simulate_idle(w, ua_loss, dt_s)
+            T_p = _simulate_idle(w, ua_loss, ua_adj, dt_s)
             all_rmse.append(_compute_rmse(w.T_nodes, T_p))
         mean_rmse = np.mean(all_rmse, axis=0)
         logger.info(

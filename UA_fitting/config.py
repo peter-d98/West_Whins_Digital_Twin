@@ -52,28 +52,28 @@ class UAConfig:
     """
 
     # --- data cadence -------------------------------------------------------
-    sampling_minutes: int = 30
+    sampling_minutes: int = 5
 
     # --- train/val split ----------------------------------------------------
     train_frac: float = 0.7
 
     # --- idle-window detection thresholds -----------------------------------
-    ashp_off_kwh: float = 0.013     # kWh per interval
-    st_off_kwh: float = 0.05       # kWh per interval
+    ashp_off_kwh: float = 0.005     # kWh per interval
+    st_off_kwh: float = 0.01       # kWh per interval
     imm_off_kwh: float = 0.01      # kWh per interval
-    jump_thrsh: float = 1.5        # °C per interval (any node)
-    min_idle_intervals: int = 2    # minimum consecutive intervals (2 × 30 min = 60 min)
+    jump_thrsh: float = 0.8        # °C per interval (any node)
+    min_idle_intervals: int = 5    # minimum consecutive intervals
 
     # --- draw detection -----------------------------------------------------
-    draw_delta_c: float = -1.0     # °C per interval (bottom node)
+    draw_delta_c: float = -0.25     # °C per interval (bottom node)
 
     # --- fitting ------------------------------------------------------------
     min_idle_windows: int = 20     # minimum usable windows
     ridge_alpha: float = 1e-4      # small ridge term; 0.0 disables
 
     # --- plotting / diagnostics ---------------------------------------------
-    summer_months: List[int] = field(default_factory=lambda: [6, 7, 8])
-    n_plot_windows: int = 3
+    summer_months: List[int] = field(default_factory=lambda: [3, 4, 5, 9, 10, 11])
+    n_plot_windows: int = 6
 
     # --- column names (match src.data_loader canonical names) ---------------
     node_cols: List[str] = field(default_factory=lambda: [

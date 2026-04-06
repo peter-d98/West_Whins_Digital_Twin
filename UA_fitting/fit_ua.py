@@ -1,44 +1,45 @@
 """
-UA_fitting.fit_ua – Fit per-node UA_loss values from idle-window data.
+UA_fitting.fit_ua – Jointly fit UA_loss and UA_adj from idle-window data.
 
 Physics / maths
 ---------------
-During idle periods (Q_st = Q_ashp = Q_imm = 0, no draws), the tank energy
-balance for node *i* at each time step reduces to:
+During idle periods (Q_st = Q_ashp = Q_imm = 0, no draws), the full energy
+balance for node *i* is:
 
-    NODE_CAP · (T_i[t+1] - T_i[t])  ≈  -UA_loss_i · (T_i[t] - T_amb[t]) · dt_s
-                                        + (inter-node conduction + mixing terms)
+    NODE_CAP_i · dT_i[t] = -UA_loss_i · (T_i[t] - T_amb[t]) · dt_s
+                           + UA_adj[i-1] · (T[i-1][t] - T_i[t]) · dt_s  (i > 0)
+                           + UA_adj[i]   · (T[i+1][t] - T_i[t]) · dt_s  (i < 3)
 
-The inter-node conduction and mixing terms depend on other TankParams that
-are kept at their defaults.  We therefore define the *net energy change not
-explained by inter-node exchange* and attribute it to ambient loss:
+This gives 4 equations per time-step transition and 7 unknowns:
+  - UA_loss[0..3]  — per-node ambient loss conductance [kW/K]
+  - UA_adj[0..2]   — adjacent-node conductance [kW/K]
+                     (UA_adj[k] couples node k and node k+1)
 
-***EDIT: this version does not subtract inter-node conduction or mixing, it allows these effects
-to be absorbed by the ua_loss parameters (sometimes leading to negative results)***
+All 4 equations at each time-step reference *different* subsets of the same
+7 parameters, so fitting them independently would corrupt each estimate with
+the un-modelled conduction flux from neighbouring nodes.  Joint fitting solves
+all 4M equations (M = total time-step transitions) simultaneously:
 
-    residual_kJ_i[t] = NODE_CAP · dT_i[t]  -  (conduction + mixing)_i[t]
+    Y  =  X · θ        Y ∈ ℝ^{4M},   X ∈ ℝ^{4M×7},   θ ∈ ℝ^7
 
-The ambient-loss predictor for node i is:
+Parameter ordering in θ:
+    [UA_loss[0], UA_loss[1], UA_loss[2], UA_loss[3],
+     UA_adj[0],  UA_adj[1],  UA_adj[2]]
 
-    X_i[t] = -(T_i[t] - T_amb[t]) · dt_s      [units: K·s]
-
-The linear system across all windows and all time steps becomes:
-
-    residual_kJ = X · UA_loss     (one column per node, independent regressions)
-
-We solve via ordinary least squares (optionally ridge-regularised), allowing
-negative UA values (which indicate net energy gain from mixing or model bias).
+We enforce physical non-negativity (lb = 0) via bounded least squares
+(scipy.optimize.lsq_linear) with optional Tikhonov ridge regularisation.
 
 Units
 -----
 - NODE_CAP_UA : array [kJ/K], shape (4,), bottom→top
-- dt_s        : seconds (1800 for 30-min)
-- UA_loss  : kW/K  (the product UA·dt_s gives kJ/K, matching NODE_CAP_UA·dT)
+- dt_s        : seconds per interval
+- UA_loss     : kW/K  (UA · dt_s gives kJ/K, matching NODE_CAP_UA · dT)
+- UA_adj      : kW/K
 - Temperatures : °C (differences are in K)
 
 Output
 ------
-JSON file with key ``"UA_loss"`` (array of 4 floats) plus metadata.
+JSON with keys ``"UA_loss"`` (4 floats), ``"UA_adj"`` (3 floats), metadata.
 """
 
 from __future__ import annotations
@@ -50,12 +51,10 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
+from scipy.optimize import lsq_linear
 
 from UA_fitting.config import UAConfig
 from UA_fitting.detector import IdleWindow
-
-# Import tank constants (read-only, no src code changes)
-from src.tank_model import TankParams
 
 # ---------------------------------------------------------------------------
 # Per-node thermal capacities matching the physical tank geometry
@@ -81,7 +80,7 @@ def fit_ua(
     *,
     output_dir: Optional[Path] = None,
 ) -> Dict:
-    """Fit 4 UA_loss values from idle windows via linear regression.
+    """Jointly fit UA_loss (4 values) and UA_adj (3 values) from idle windows.
 
     Parameters
     ----------
@@ -96,93 +95,98 @@ def fit_ua(
     Returns
     -------
     result : dict
-        ``{"UA_loss": [float]*4, "metadata": {...}}``
+        ``{"UA_loss": [float]*4, "UA_adj": [float]*3, "metadata": {...}}``
     """
     if cfg is None:
         cfg = UAConfig()
 
     dt_s = cfg.sampling_minutes * 60.0  # seconds per interval
 
-    # Use default TankParams for inter-node conduction/mixing baseline.
-    baseline_params = TankParams()
-
-    # -- Step 1: Assemble the linear system ----------------------------------
+    # -- Step 1: Assemble the joint linear system ----------------------------
     #
-    # For each node i we build:
-    #   y_i  = residual energy change [kJ] not explained by inter-node terms
-    #   X_i  = -(T_i - T_amb) * dt_s      [K·s]  (the ambient-loss predictor)
+    # Parameter vector θ (7 unknowns), indices:
+    #   0..3  UA_loss[0..3]   ambient loss per node
+    #   4..6  UA_adj[0..2]    inter-node conductance (adj[k] couples node k & k+1)
     #
-    # Then  y = X * UA_loss_i  →  solved per-node via least-squares.
+    # For node i at time t:
+    #   dE_i = -UA_loss[i] * (T_i - T_amb) * dt_s
+    #          + UA_adj[i-1] * (T[i-1] - T_i) * dt_s   (if i > 0)
+    #          + UA_adj[i]   * (T[i+1] - T_i) * dt_s   (if i < 3)
+    #
+    # This gives one (7,) feature row per (node, timestep) pair.
+    # UA_adj[k] between nodes k and k+1 is at parameter index 4+k.
+    # For node i:
+    #   "from below" predictor uses UA_adj[i-1] at index 4+(i-1) = 3+i
+    #   "from above" predictor uses UA_adj[i]   at index 4+i
 
-    # We collect rows across all windows (one row per time-step transition).
-    y_all = []  # list of (4,) arrays
-    X_all = []  # list of (4,) arrays
+    y_list: list = []   # one scalar per (node, timestep)
+    x_list: list = []   # one (7,) row per (node, timestep)
 
     for w in windows:
-        # w.T_nodes shape: (n_intervals, 4), w.T_amb shape: (n_intervals,)
         n = w.n_intervals
         for t in range(n - 1):
-            T_cur = w.T_nodes[t]       # (4,) — current temperatures [°C]
-            T_nxt = w.T_nodes[t + 1]   # (4,) — next-step temperatures [°C]
-            T_amb = w.T_amb[t]         # scalar [°C]
+            T = w.T_nodes[t]        # (4,) current temperatures [°C]
+            T_nxt = w.T_nodes[t + 1]  # (4,) next temperatures [°C]
+            T_amb = w.T_amb[t]      # scalar [°C]
 
-            # Measured energy change per node [kJ]
-            dE_meas = NODE_CAP_UA * (T_nxt - T_cur)   # (4,)
+            dE = NODE_CAP_UA * (T_nxt - T)  # (4,) measured energy change [kJ]
 
-            # Inter-node conduction and mixing at current T using baseline params.
-            # These are the terms we subtract to isolate the ambient-loss signal.
-            cond_mix = _inter_node_energy(T_cur, baseline_params, dt_s)  # (4,) kJ
+            for i in range(4):
+                row = np.zeros(7)
+                row[i] = -(T[i] - T_amb) * dt_s        # UA_loss[i]
+                if i > 0:
+                    row[3 + i] = (T[i - 1] - T[i]) * dt_s  # UA_adj[i-1]
+                if i < 3:
+                    row[4 + i] = (T[i + 1] - T[i]) * dt_s  # UA_adj[i]
+                y_list.append(dE[i])
+                x_list.append(row)
 
-            # Residual = measured change minus conduction/mixing contribution
-            residual = dE_meas   # (4,) kJ # conduction/mixing effects were ignored (let them be absorbed by UA)
-
-            # Predictor for ambient loss:
-            #   loss_kJ_i = UA_i * (T_i - T_amb) * dt_s
-            # Rearranged:  residual_i = -UA_i * (T_i - T_amb) * dt_s
-            # So predictor X_i = -(T_i - T_amb) * dt_s  and  residual = X * UA
-            X_row = -(T_cur - T_amb) * dt_s   # (4,)  [K·s]
-
-            y_all.append(residual)
-            X_all.append(X_row)
-
-    if len(y_all) == 0:
+    if len(y_list) == 0:
         logger.error("No time-step transitions available for fitting.")
-        return {"UA_loss": [0.0] * 4, "metadata": {"error": "no_data"}}
+        return {
+            "UA_loss": [0.0] * 4,
+            "UA_adj": [0.0] * 3,
+            "metadata": {"error": "no_data"},
+        }
 
-    Y = np.array(y_all)  # (M, 4)
-    X = np.array(X_all)  # (M, 4)
+    Y = np.array(y_list)   # (4M,)
+    X = np.array(x_list)   # (4M, 7)
 
-    logger.info("Assembled linear system: %d rows from %d windows.", len(Y), len(windows))
+    n_equations = len(Y)
+    logger.info(
+        "Joint linear system: %d equations, 7 unknowns  (%d windows).",
+        n_equations, len(windows),
+    )
 
-    # -- Step 2: Solve per-node least squares (optionally with ridge) --------
+    # -- Step 2: Solve with non-negative bounded least squares ---------------
     #
-    # For each node i:  Y[:,i] = X[:,i] * ua_i
-    # This is a univariate regression (single coefficient per node).
-    # With ridge:  min || X_i * ua_i - Y_i ||^2 + alpha * ua_i^2
+    # Enforce θ ≥ 0 (all UA values are physically non-negative).
+    # Ridge regularisation:  augment with √α · I  so that the augmented
+    # normal equations become (X^T X + α I) θ = X^T Y.
 
-    ua_fit = np.zeros(4)
-    for i in range(4):
-        x_col = X[:, i]   # (M,)
-        y_col = Y[:, i]   # (M,)
+    if cfg.ridge_alpha > 0.0:
+        ridge_mat = np.sqrt(cfg.ridge_alpha) * np.eye(7)
+        X_aug = np.vstack([X, ridge_mat])
+        Y_aug = np.concatenate([Y, np.zeros(7)])
+    else:
+        X_aug, Y_aug = X, Y
 
-        # Normal equation:  ua_i = (X^T X + alpha)^{-1} X^T Y
-        xtx = np.dot(x_col, x_col) + cfg.ridge_alpha
-        xty = np.dot(x_col, y_col)
+    fit_result = lsq_linear(X_aug, Y_aug, bounds=(0.0, np.inf), method="bvls")
+    theta = fit_result.x   # (7,)
 
-        if abs(xtx) < 1e-12:
-            logger.warning("Node %d: singular system (xtx≈0), setting UA=0.", i)
-            ua_fit[i] = 0.0
-        else:
-            ua_fit[i] = xty / xtx
+    ua_loss = theta[0:4]
+    ua_adj  = theta[4:7]
 
-    logger.info("Fitted UA_loss [kW/K]: %s", np.round(ua_fit, 6).tolist())
+    logger.info("Fitted UA_loss [kW/K]: %s", np.round(ua_loss, 6).tolist())
+    logger.info("Fitted UA_adj  [kW/K]: %s", np.round(ua_adj,  6).tolist())
 
     # -- Step 3: Build result dictionary -------------------------------------
     result = {
-        "UA_loss": [round(float(v), 8) for v in ua_fit],
+        "UA_loss": [round(float(v), 8) for v in ua_loss],
+        "UA_adj":  [round(float(v), 8) for v in ua_adj],
         "metadata": {
             "n_windows": len(windows),
-            "n_transitions": len(Y),
+            "n_equations": n_equations,
             "train_date_start": str(windows[0].start) if windows else None,
             "train_date_end": str(windows[-1].end) if windows else None,
             "thresholds": {
@@ -218,23 +222,25 @@ def fit_ua(
 
 def _inter_node_energy(
     T: np.ndarray,
-    params: TankParams,
+    ua_adj: np.ndarray,
     dt_s: float,
 ) -> np.ndarray:
     """Compute the inter-node conduction energy contribution [kJ].
 
-    This mirrors the conduction terms from ``tank_model.tank_step``
-    but returns the contribution as an array of (4,) energy values [kJ].
+    Parameters
+    ----------
+    T : (4,) current node temperatures [°C].
+    ua_adj : (3,) inter-node conductances [kW/K].
+    dt_s : time-step [s].
 
-    During idle periods we assume no draw, so draw-related terms are zero.
+    Returns
+    -------
+    energy : (4,) array of conduction energy per node [kJ].
     """
     energy = np.zeros(4)
     for i in range(4):
-        cond = 0.0
         if i > 0:
-            cond += params.UA_adj[i - 1] * (T[i - 1] - T[i]) * dt_s
+            energy[i] += ua_adj[i - 1] * (T[i - 1] - T[i]) * dt_s
         if i < 3:
-            cond += params.UA_adj[i] * (T[i + 1] - T[i]) * dt_s
-
-        energy[i] = cond
+            energy[i] += ua_adj[i] * (T[i + 1] - T[i]) * dt_s
     return energy

@@ -157,10 +157,11 @@ def main() -> int:
         )
         return 1
 
-    # -- 5. Fit UA_loss -------------------------------------------------------
-    logger.info("Fitting UA_loss from %d idle windows ...", len(windows))
+    # -- 5. Fit UA_loss and UA_adj jointly -----------------------------------
+    logger.info("Fitting UA_loss + UA_adj from %d idle windows ...", len(windows))
     result = fit_ua(windows, cfg, output_dir=_OUTPUT_DIR)
     logger.info("Fitted UA_loss = %s", result["UA_loss"])
+    logger.info("Fitted UA_adj  = %s", result["UA_adj"])
 
     # -- 6. Optional: diagnostic plots ----------------------------------------
     if args.plot:
@@ -172,7 +173,13 @@ def main() -> int:
     if args.qc_csv:
         qc_path = _OUTPUT_DIR / "qc_summary.csv"
         import numpy as np
-        write_qc_csv(windows, np.array(result["UA_loss"]), cfg, output_path=qc_path)
+        write_qc_csv(
+            windows,
+            np.array(result["UA_loss"]),
+            cfg,
+            ua_adj=np.array(result["UA_adj"]),
+            output_path=qc_path,
+        )
 
     logger.info("UA fitting pipeline complete.")
     return 0
