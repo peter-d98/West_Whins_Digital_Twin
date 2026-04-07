@@ -1,0 +1,69 @@
+# column_mapping_5min.yaml
+# Canonical → actual CSV header names for 5-minute resolution data.
+#
+# The 5-minute CSV (FullDS_Findhorn_5min.csv) uses the same column names
+# as the 30-minute FullDS_Findhorn.csv.  The only difference is the
+# sampling cadence (5 min vs 30 min), which affects:
+#   - interval energy clipping thresholds
+#   - cumulative → interval differencing resolution
+#   - the frequency string used by asfreq()
+
+paths:
+  plant_csv: null          # set externally
+  weather_csv: null
+  wind_csv: null
+
+time:
+  name: "Time"
+  format: "%d/%m/%Y %H:%M"
+  timezone: "Europe/London"
+
+# Ambient (plant room) temperature used for tank losses and ASHP maps
+ambient:
+  ambient_c: "T_amb [C]"
+  out_c: "T_out [C]"
+
+# 4-node tank temperatures
+tank:
+  bottom_c: "Tank Bottom [°C]"
+  mid_c:    "Tank Mid [°C]"
+  mid_hi_c: "Tank Mid Hi [°C]"
+  top_c:    "Tank Top [°C]"
+
+# Solar-thermal (Stage-1 uses ST as-measured)
+solar_thermal:
+  power_kw:       "ST Power [kW]"
+  flow_l:         "ST Flow [L]"
+  flow_temp_c:    "ST Flow T [°C]"
+  return_temp_c:  "ST Ret T [°C]"
+  tot_energy_mwh: "ST Tot Energy [MWh]"
+  tot_vol_l:      "ST Tot Vol [L]"
+
+# ASHP electrical energy
+ashp:
+  elec_cum_kwh: "ASHP Elec [kWh]"
+  elec_int_kwh: "ASHP Inst [kWh]"
+
+# Immersion heaters
+immersion:
+  total_cum_kwh: "Imm Tot [kWh]"
+  total_int_kwh: "Imm Tot Inst [kWh]"
+  backup_int_kwh: "Backup Imm Elec [kWh]"
+
+# PV proxy
+pv_proxy:
+  inst_kw: "PV Inst [kW]"
+
+optional:
+  ignore_columns: []
+
+units:
+  temperature: "°C"
+  power: "kW"
+  energy: "kWh"
+  volume: "L"
+
+assumptions:
+  sampling_minutes: 5
+  st_use_as_measured: true
+  ambient_source: "column"   # use T_amb [C] column

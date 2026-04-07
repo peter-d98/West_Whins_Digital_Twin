@@ -191,6 +191,36 @@ def load_and_clean(
     return df
 
 
+def load_5min(
+    csv_path: str | Path | None = None,
+    yaml_path: str | Path | None = None,
+) -> pd.DataFrame:
+    """Load the pre-built 5-minute CSV via :func:`load_and_clean`.
+
+    This is a convenience wrapper that defaults to
+    ``data/FullDS_Findhorn_5min.csv`` and ``column_mapping_5min.yaml``.
+
+    Parameters
+    ----------
+    csv_path : path to the 5-minute CSV (default: ``data/FullDS_Findhorn_5min.csv``).
+    yaml_path : path to column mapping YAML (default: ``column_mapping_5min.yaml``).
+
+    Returns
+    -------
+    pd.DataFrame with a ``DatetimeIndex`` named ``time`` at 5-minute cadence.
+    """
+    root = Path(__file__).resolve().parent.parent
+    if csv_path is None:
+        csv_path = root / "data" / "FullDS_Findhorn_5min.csv"
+    if yaml_path is None:
+        yaml_path = root / "column_mapping_5min.yaml"
+
+    cfg = load_column_mapping(yaml_path)
+    sampling_minutes = cfg.get("assumptions", {}).get("sampling_minutes", 5)
+
+    return load_and_clean(csv_path, yaml_path, sampling_minutes=sampling_minutes)
+
+
 def load_and_merge_1min(
     energy_paths: list,
     tank_path: str | Path,

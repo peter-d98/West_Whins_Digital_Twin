@@ -315,10 +315,48 @@ def fit_ashp(
     mean_cop_capped = round(float(cop_back_capped.mean()), 3)
     std_cop_capped = round(float(cop_back_capped.std()), 3)
 
+    # -- Step 5b: Compute empirical f_ashp from window temperature deltas ----
+    # For each accepted window, the temperature difference between the pre-
+    # collapse state (T[first_k - 1]) and the end of the window (T[last_k])
+    # captures where heat genuinely settled after a full charging cycle.
+    # Collapse and restratification cancel in the window ΔT, for the same
+    # reason they cancel in the Q back-calculation.  Bottom (node 0) is
+    # excluded: it is never directly heated by the ASHP HX circuit.
+    T_train_vals = df_train[cfg.node_cols].values
+    accepted_wids = set(bc_pos["window_id"].values)
+
+    f_ashp_rows = []
+    for w in windows:
+        if w.window_id not in accepted_wids:
+            continue
+        first_k = w.indices[0]
+        last_k = w.indices[-1]
+        dT = T_train_vals[last_k] - T_train_vals[first_k - 1]   # shape (4,)
+        energy = NODE_CAP_ASHP * dT
+        energy[0] = 0.0                      # bottom excluded
+        energy = np.maximum(energy, 0.0)     # clip cooling artefacts
+        total = energy.sum()
+        if total > 1e-3:
+            f_ashp_rows.append(energy / total)
+
+    f_ashp_arr = np.array(f_ashp_rows)       # shape (n_valid, 4)
+    f_ashp_median = np.median(f_ashp_arr, axis=0)
+    f_ashp_median[0] = 0.0
+    _s = f_ashp_median.sum()
+    if _s > 0:
+        f_ashp_median /= _s
+    f_ashp_mean = np.mean(f_ashp_arr, axis=0)
+    f_ashp_std  = np.std(f_ashp_arr, axis=0)
+    logger.info(
+        "Empirical f_ashp (median): bottom=%.3f mid=%.3f mid-hi=%.3f top=%.3f",
+        *f_ashp_median,
+    )
+
     # -- Step 6: Build result dictionary -------------------------------------
     result = {
         "ashp": {
             "c": [round(float(v), 6) for v in ashp_params.c],
+            "f_ashp": [round(float(v), 4) for v in f_ashp_median],
         },
         "identification": {
             "n_windows_total": n_total,
@@ -331,6 +369,13 @@ def fit_ashp(
             "mean_back_cop_cap": _COP_REPORT_CAP,
             "n_cop_outliers": n_cop_outliers,
             "median_back_cop": round(float(cop_back.median()), 3),
+            "f_ashp_stats": {
+                "nodes": ["mid", "mid_hi", "top"],
+                "mean":   [round(float(v), 4) for v in f_ashp_mean[1:]],
+                "median": [round(float(v), 4) for v in f_ashp_median[1:]],
+                "std":    [round(float(v), 4) for v in f_ashp_std[1:]],
+                "n_windows": len(f_ashp_rows),
+            },
             "thresholds": {
                 "ashp_off_kwh": cfg.ashp_off_kwh,
                 "st_off_kwh": cfg.st_off_kwh,
@@ -365,6 +410,6 @@ def fit_ashp(
 def _empty_result() -> Dict:
     """Return an empty result dict when fitting cannot proceed."""
     return {
-        "ashp": {"c": [0.0] * 4},
+        "ashp": {"c": [0.0] * 4, "f_ashp": [0.0, 0.0, 0.0, 0.0]},
         "identification": {"error": "insufficient_data"},
     }

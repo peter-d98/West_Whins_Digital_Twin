@@ -151,6 +151,8 @@ class TestASHPModel:
         P_kwh = P_true * 0.5 + rng.normal(0, 0.05, n)
         params = fit_ashp_maps(T_amb, T_sink, None, P_kwh)
         assert params.b is not None
+        assert params.c is not None
+        assert len(params.c) == 4
 
 
 # ---------------------------------------------------------------------------

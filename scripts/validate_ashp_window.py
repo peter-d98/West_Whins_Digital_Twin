@@ -24,8 +24,8 @@ if str(_ROOT) not in sys.path:
 
 from src.data_loader import load_and_clean
 from src.solar_thermal import compute_st_energy
-from src.tank_model import TankParams, simulate
-from src.ashp_model import ASHPParams, predict_capacity, predict_cop, sink_proxy
+from src.tank_model import TankParams, NODE_CAP, simulate
+from src.ashp_model import ASHPParams, predict_cop, sink_proxy
 
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -34,8 +34,8 @@ from matplotlib.patches import Patch
 
 _GLOBAL_JSON  = _ROOT / "Global_fitting" / "output" / "global_fit.json"
 _ASHP_JSON    = _ROOT / "ASHP_fitting" / "output" / "ashp_fit.json"
-_DEFAULT_CSV  = _ROOT / "data" / "FullDS_Findhorn.csv"
-_DEFAULT_YAML = _ROOT / "column_mapping.yaml"
+_DEFAULT_CSV  = _ROOT / "data" / "FullDS_Findhorn_5min.csv"
+_DEFAULT_YAML = _ROOT / "column_mapping_5min.yaml"
 _PLOT_OUT     = _ROOT / "Global_fitting" / "output" / "plots"
 
 NODE_LABELS  = ["Bottom", "Mid", "Mid-Hi", "Top"]
@@ -58,12 +58,13 @@ def _load_ashp_params(path):
     with open(path) as f: d = json.load(f)
     a = d["ashp"]
     return ASHPParams(
-        a=np.array(a["a"], dtype=float),
-        b=np.array(a["b"], dtype=float),
+        c=np.array(a["c"], dtype=float) if "c" in a else None,
+        a=np.array(a["a"], dtype=float) if "a" in a else None,
+        b=np.array(a["b"], dtype=float) if "b" in a else None,
     )
 
 
-def run(start, end, csv, yaml, global_json, ashp_json, dt_h=0.5):
+def run(start, end, csv, yaml, global_json, ashp_json, sampling_minutes=5, backcalc=False):
     tank_params = _load_tank_params(global_json)
     ashp_params = _load_ashp_params(ashp_json)
 
@@ -71,9 +72,16 @@ def run(start, end, csv, yaml, global_json, ashp_json, dt_h=0.5):
     print("  UA_loss : {} kW/K".format(np.round(tank_params.UA_loss, 5).tolist()))
     print("  UA_adj  : {} kW/K".format(np.round(tank_params.UA_adj,  5).tolist()))
     print("  f_ashp  : {}".format(tank_params.f_ashp.tolist()))
+    if backcalc:
+        print("  ** Q_ashp mode: BACK-CALCULATED from nodes 1-3 energy balance **")
+    else:
+        print("  ** Q_ashp mode: PREDICTED (P_meas x COP map) — MPC-relevant **")
 
-    df = load_and_clean(csv, yaml)
-    df["st_kwh"] = compute_st_energy(df)
+    dt_h = sampling_minutes / 60.0
+    dt_s = sampling_minutes * 60.0
+
+    df = load_and_clean(csv, yaml, sampling_minutes=sampling_minutes)
+    df["st_kwh"] = compute_st_energy(df, dt_minutes=sampling_minutes)
 
     mask = (df.index >= start) & (df.index <= end)
     win = df.loc[mask].copy()
@@ -90,23 +98,52 @@ def run(start, end, csv, yaml, global_json, ashp_json, dt_h=0.5):
     Q_imm   = win["imm_tot_inst_kwh"].fillna(0).values
     T_amb   = win["t_amb_c"].fillna(win["t_amb_c"].median()).values
 
-    T_sink  = sink_proxy(win["tank_mid_c"].values, win["tank_top_c"].values)
-    T_out   = win["t_out_c"].fillna(win["t_out_c"].median()).values
-    cap_kw = predict_capacity(T_out, T_sink, ashp_params)
-    cop     = predict_cop(T_out, T_sink, ashp_params)
     P_meas  = win["ashp_inst_kwh"].fillna(0).values
-    # top_rising gates Q_ashp injection: heat arrives at top first (coil return).
-    # mid_rising fires one step earlier (hydraulic displacement) and is used
-    # only for plot shading to show when the ASHP is visibly running.
-    top_rising = pd.Series(win["tank_top_c"].values, index=win.index).diff().fillna(0.0).values > 1.0
-    mid_rising = pd.Series(win["tank_mid_c"].values, index=win.index).diff().fillna(0.0).values > 1.0
-    ashp_dhw_on = (P_meas > 0.013) & top_rising
-    ashp_visible = (P_meas > 0.013) & mid_rising   # earlier detection for shading only
-    # NOTE this is temporarily changed to the old logic 
-    Q_ashp  = np.where(ashp_dhw_on, cap_kw * dt_h, 0.0)
-    Q_ashp  = np.concatenate([Q_ashp[1:], [0.0]])
+    # mid_rising / top_rising thresholds are tuned for 5-min data.
+    # 0.25 °C/5-min ≈ 3 °C/hour — indicates active DHW heating vs passive drift.
+    # (The old 1.0 °C threshold was calibrated for 30-min data; at 5-min it only
+    # caught the initial stratification-collapse burst and missed steady charging.)
+    mid_diff = pd.Series(win["tank_mid_c"].values, index=win.index).diff().fillna(0.0).values
+    top_diff = pd.Series(win["tank_top_c"].values, index=win.index).diff().fillna(0.0).values
+    mid_rising = mid_diff > 0.25
+    top_rising = top_diff > 0.25
+    node_rising = mid_rising | top_rising
+    # Shading: ASHP visibly on (power + at least one upper node rising).
+    # Threshold matches pipeline cfg.ashp_off_kwh = 0.016 kWh.
+    ashp_visible = (P_meas > 0.016) & node_rising
 
-    n_ashp = int(ashp_dhw_on.sum())
+    # Gate: ASHP drawing power AND solar-thermal / immersion off
+    # AND at least one upper node rising (separates DHW from space-heating).
+    ashp_on = P_meas > 0.016
+    st_off  = Q_st <= 0.001
+    imm_off = Q_imm <= 0.01
+    ashp_dhw_gate = ashp_on & st_off & imm_off & node_rising
+
+    if backcalc:
+        # Back-calculate Q_ashp from the measured energy balance on nodes 1–3.
+        # Useful as a diagnostic to test the tank model with "known" heat.
+        Q_ashp = np.zeros(N)
+        for k in range(1, N):
+            if not ashp_dhw_gate[k]:
+                continue
+            storage_kJ = sum(
+                NODE_CAP[i] * (T_meas[k, i] - T_meas[k - 1, i])
+                for i in range(1, 4)
+            )
+            loss_kJ = sum(
+                tank_params.UA_loss[i] * (T_meas[k - 1, i] - T_amb[k]) * dt_s
+                for i in range(1, 4)
+            )
+            Q_kJ = storage_kJ + loss_kJ
+            Q_ashp[k] = max(Q_kJ / 3600.0, 0.0)
+    else:
+        # Predicted Q_ashp = P_meas × COP map — MPC-relevant forward prediction.
+        T_sink = sink_proxy(win["tank_mid_c"].values, win["tank_top_c"].values)
+        T_out  = win["t_out_c"].fillna(win["t_out_c"].median()).values
+        cop    = predict_cop(T_out, T_sink, ashp_params)
+        Q_ashp = np.where(ashp_dhw_gate, P_meas * cop, 0.0)
+
+    n_ashp = int((Q_ashp > 0).sum())
     total_Q_ashp = float(Q_ashp.sum())
     total_Q_st   = float(Q_st.sum())
     total_Q_imm  = float(Q_imm.sum())
@@ -117,7 +154,7 @@ def run(start, end, csv, yaml, global_json, ashp_json, dt_h=0.5):
 
     # --- Free forward simulation from t=0 (no mid-window resets) ---
     T_hist = simulate(
-        T_meas[0], Q_st, Q_ashp, Q_imm, T_amb, tank_params,
+        T_meas[0], Q_st, Q_ashp, Q_imm, T_amb, tank_params, dt_s=dt_s,
     )
     # T_hist shape (N+1, 4); T_hist[k] = state after k steps
     T_pred = T_hist[1:]   # (N, 4) — prediction one step ahead of each input
@@ -135,7 +172,8 @@ def run(start, end, csv, yaml, global_json, ashp_json, dt_h=0.5):
     fig, axes = plt.subplots(5, 1, figsize=(14, 13), sharex=True,
                              gridspec_kw={"height_ratios": [2, 2, 2, 2, 1.2]})
     fig.suptitle(
-        "Free forward simulation (ASHP charging window)\n{} to {}".format(
+        "Free forward simulation (ASHP charging window){}\n{} to {}".format(
+            " [Q_ashp = back-calc nodes 1-3]" if backcalc else " [Q_ashp = P_meas x COP]",
             win.index[0].strftime("%Y-%m-%d %H:%M"),
             win.index[-1].strftime("%Y-%m-%d %H:%M")),
         fontsize=12,
@@ -143,7 +181,6 @@ def run(start, end, csv, yaml, global_json, ashp_json, dt_h=0.5):
 
     # Shading uses mid_rising (earliest visible sign of ASHP activity).
     # Span ends are extended by one dt so the final on-interval is fully covered.
-    # Q_ashp injection uses top_rising + shift — these are intentionally different.
     dt_index = win.index[1] - win.index[0]  # infer interval length from data
     ashp_spans = []
     in_span = False
@@ -160,8 +197,7 @@ def run(start, end, csv, yaml, global_json, ashp_json, dt_h=0.5):
     # Temperature panels (indices 0-3)
     # T_hist[0] = reset = T_meas[0], then T_hist[1..N] are predictions
     # Align: win.index[k] corresponds to T_meas[k] and T_hist[k+1] (the prediction)
-    # For a clean plot, show T_hist[0..N-1] vs T_meas[0..N-1] (offset by 0 for clarity)
-    # Actually: show measured at all N points; show predicted starting from the
+    # Show measured at all N points; show predicted starting from the
     # second point (T_hist[1..N]) — first point is shared as the reset.
     pred_times = win.index  # T_hist[1..N] predicted VALUES plotted at win.index[0..N-1]
     pred_T = T_hist[1:N+1]  # shape (N, 4)
@@ -176,8 +212,11 @@ def run(start, end, csv, yaml, global_json, ashp_json, dt_h=0.5):
                 label="Predicted", zorder=3)
         for (s, e) in ashp_spans:
             ax.axvspan(s, e, alpha=0.12, color="tab:green", zorder=1)
-        err_rmse = np.sqrt(np.mean((pred_T[1:, i] - T_meas[1:, i])**2))
-        err_bias = np.mean(pred_T[1:, i] - T_meas[1:, i])
+        # Compare free-sim prediction for time k+1 (pred_T[:-1] = T_hist[1:N-1])
+        # against measurement at time k+1 (T_meas[1:]).  Consistent with the
+        # terminal RMSE.  (pred_T[1:] would be off by one step.)
+        err_rmse = np.sqrt(np.mean((pred_T[:-1, i] - T_meas[1:, i])**2))
+        err_bias = np.mean(pred_T[:-1, i] - T_meas[1:, i])
         ax.set_ylabel("{} [C]".format(NODE_LABELS[i]))
         ax.legend(
             title="RMSE={:.2f}C  bias={:+.2f}C".format(err_rmse, err_bias),
@@ -204,8 +243,8 @@ def run(start, end, csv, yaml, global_json, ashp_json, dt_h=0.5):
         handles=axes[0].get_legend_handles_labels()[0] + [shading_patch],
         labels=axes[0].get_legend_handles_labels()[1] + ["ASHP DHW on"],
         title="RMSE={:.2f}C  bias={:+.2f}C".format(
-            float(np.sqrt(np.mean((pred_T[1:, 0] - T_meas[1:, 0])**2))),
-            float(np.mean(pred_T[1:, 0] - T_meas[1:, 0]))),
+            float(np.sqrt(np.mean((pred_T[:-1, 0] - T_meas[1:, 0])**2))),
+            float(np.mean(pred_T[:-1, 0] - T_meas[1:, 0]))),
         loc="best", fontsize=7, title_fontsize=7,
     )
 
@@ -216,7 +255,8 @@ def run(start, end, csv, yaml, global_json, ashp_json, dt_h=0.5):
 
     _PLOT_OUT.mkdir(parents=True, exist_ok=True)
     tag = win.index[0].strftime("%Y%m%d_%H%M")
-    out = _PLOT_OUT / "ashp_window_{}.png".format(tag)
+    suffix = "_backcalc" if backcalc else ""
+    out = _PLOT_OUT / "ashp_window_{}{}.png".format(tag, suffix)
     fig.savefig(out, dpi=150, bbox_inches="tight")
     print("\nPlot saved to: {}".format(out))
     plt.close(fig)
@@ -230,9 +270,12 @@ def _parse():
     p.add_argument("--yaml",  default=str(_DEFAULT_YAML))
     p.add_argument("--json",  default=str(_GLOBAL_JSON))
     p.add_argument("--ashp-json", default=str(_ASHP_JSON))
+    p.add_argument("--backcalc", action="store_true",
+                   help="Use back-calculated Q_ashp from measured temperatures "
+                        "instead of gated P_meas x COP.")
     return p.parse_args()
 
 if __name__ == "__main__":
     args = _parse()
     run(args.start, args.end, Path(args.csv), Path(args.yaml),
-        Path(args.json), Path(args.ashp_json))
+        Path(args.json), Path(args.ashp_json), backcalc=args.backcalc)

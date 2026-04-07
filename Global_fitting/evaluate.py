@@ -18,9 +18,9 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from src.ashp_model import ASHPParams, predict_capacity, predict_cop, sink_proxy
+from src.ashp_model import ASHPParams, predict_cop, sink_proxy
 from src.solar_thermal import compute_st_energy
-from src.tank_model import TankParams, tank_step
+from src.tank_model import NODE_CAP, TankParams, tank_step
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,38 @@ _NODE_LABELS = ["Bottom", "Mid", "Mid-Hi", "Top"]
 _NODE_COLOURS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
 
-def _prepare_inputs(df, ashp_params: ASHPParams, dt_h: float = 0.5):
-    """Build arrays needed for one-step-ahead prediction."""
+def _prepare_inputs(
+    df,
+    ashp_params: ASHPParams,
+    ua_loss: np.ndarray | None = None,
+    dt_h: float | None = None,
+    sampling_minutes: int = 5,
+    ua_adj: np.ndarray | None = None,
+):
+    """Build arrays needed for one-step-ahead prediction.
+
+    Q_ashp is back-calculated from the measured energy balance on nodes 1–3,
+    gated by a minimal mask (ASHP on, ST off, immersion off).  This avoids
+    dependence on the COP map or the restrictive top_rising detection gate.
+
+    Parameters
+    ----------
+    ua_loss : array (4,)
+        Per-node UA to ambient [kW/K].  Required for the back-calculation.
+    dt_h : float, optional
+        Time-step in hours.  Derived from *sampling_minutes* if not given.
+    sampling_minutes : int
+        Interval cadence [minutes].  Used when *dt_h* is None.
+    ua_adj : array (3,), optional
+        Inter-node conductances [kW/K].  When provided, the heat conducted
+        from mid (node 1) to bottom (node 0) via ua_adj[0] is added back to
+        Q_ashp to account for heat leaving the 3-node accounting boundary.
+    """
+    if dt_h is None:
+        dt_h = sampling_minutes / 60.0
+    if ua_loss is None:
+        raise ValueError("ua_loss is required for back-calculated Q_ashp")
+
     T_meas = df[["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c"]].values
 
     if "st_kwh" in df.columns:
@@ -48,23 +78,44 @@ def _prepare_inputs(df, ashp_params: ASHPParams, dt_h: float = 0.5):
     else:
         Q_st = compute_st_energy(df, dt_minutes=dt_h * 60).values
 
-    T_sink = sink_proxy(df["tank_mid_c"].values, df["tank_top_c"].values)
-    T_out = df["t_out_c"].fillna(df["t_out_c"].median()).values
-    cap_kw = predict_capacity(T_out, T_sink, ashp_params)
-    cop    = predict_cop(T_out, T_sink, ashp_params)
     P_meas = df["ashp_inst_kwh"].fillna(0).values
-    top_rising = pd.Series(df["tank_top_c"].values, index=df.index).diff().fillna(0.0).values > 1.0
-    ashp_dhw_on = (P_meas > 0.013) & top_rising
-    Q_ashp = np.where(ashp_dhw_on, P_meas * cop, 0.0)
-    Q_ashp = np.concatenate([Q_ashp[1:], [0.0]])
+    Q_imm  = df["imm_tot_inst_kwh"].fillna(0).values
+    T_amb  = df["t_amb_c"].fillna(df["t_amb_c"].median()).values
 
-    Q_imm = df["imm_tot_inst_kwh"].fillna(0).values
-    T_amb = df["t_amb_c"].fillna(df["t_amb_c"].median()).values
+    ashp_on = P_meas > 0.016
+    st_off  = Q_st <= 0.001
+    imm_off = Q_imm <= 0.01
+    ashp_dhw_gate = ashp_on & st_off & imm_off
+
+    dt_s = dt_h * 3600.0
+    N = len(P_meas)
+    Q_ashp = np.zeros(N)
+    for k in range(1, N):
+        if not ashp_dhw_gate[k]:
+            continue
+        storage_kJ = sum(
+            NODE_CAP[i] * (T_meas[k, i] - T_meas[k - 1, i])
+            for i in range(1, 4)
+        )
+        loss_kJ = sum(
+            ua_loss[i] * (T_meas[k - 1, i] - T_amb[k]) * dt_s
+            for i in range(1, 4)
+        )
+        Q_kJ = storage_kJ + loss_kJ
+        # Boundary correction: heat conducted from mid (node 1) to bottom
+        # (node 0) via ua_adj[0] leaves the 3-node accounting boundary.
+        # Guard: only apply when Q_kJ > 0 (i.e. genuine DHW charging), not
+        # during SH-only intervals where T_mid > T_bot from prior stratification
+        # would otherwise introduce a false positive Q_ashp contribution.
+        if ua_adj is not None and Q_kJ > 0:
+            Q_kJ += float(ua_adj[0]) * (T_meas[k - 1, 1] - T_meas[k - 1, 0]) * dt_s
+        Q_ashp[k] = max(Q_kJ / 3600.0, 0.0)
 
     return dict(T_meas=T_meas, Q_st=Q_st, Q_ashp=Q_ashp, Q_imm=Q_imm, T_amb=T_amb)
 
 
-def _one_step_ahead(inputs: dict, params: TankParams) -> np.ndarray:
+def _one_step_ahead(inputs: dict, params: TankParams,
+                    dt_s: float = 300.0) -> np.ndarray:
     """One-step-ahead prediction: each step resets to the measured state.
 
     Returns T_pred of shape (N-1, 4).
@@ -84,6 +135,7 @@ def _one_step_ahead(inputs: dict, params: TankParams) -> np.ndarray:
             float(Q_imm[k]),
             float(T_amb[k]),
             params,
+            dt_s,
         )
     return T_pred
 
@@ -93,6 +145,9 @@ def evaluate_split(
     params: TankParams,
     ashp_params: ASHPParams,
     label: str = "train",
+    ua_loss: np.ndarray | None = None,
+    sampling_minutes: int = 5,
+    ua_adj: np.ndarray | None = None,
 ) -> dict:
     """Compute per-node RMSE and MAE using one-step-ahead prediction.
 
@@ -103,17 +158,28 @@ def evaluate_split(
     params : TankParams
         Fitted tank parameters.
     ashp_params : ASHPParams
-        Frozen ASHP parameters.
+        Frozen ASHP parameters (retained for API compatibility).
     label : str
         Label for logging.
+    ua_loss : array (4,)
+        Per-node UA to ambient [kW/K].  Falls back to params.UA_loss.
+    sampling_minutes : int
+        Interval cadence [minutes].
+    ua_adj : array (3,), optional
+        Inter-node conductances [kW/K].  Passed to _prepare_inputs for the
+        bottom-boundary correction on back-calculated Q_ashp.
 
     Returns
     -------
     dict with keys: label, node_rmse, node_mae, n_intervals.
     """
-    inputs = _prepare_inputs(df, ashp_params)
+    if ua_loss is None:
+        ua_loss = params.UA_loss
+    dt_s = sampling_minutes * 60.0
+    inputs = _prepare_inputs(df, ashp_params, ua_loss=ua_loss,
+                             sampling_minutes=sampling_minutes, ua_adj=ua_adj)
     T_meas = inputs["T_meas"]
-    T_pred = _one_step_ahead(inputs, params)
+    T_pred = _one_step_ahead(inputs, params, dt_s=dt_s)
 
     errors = T_pred - T_meas[1:]
     node_rmse = {}
@@ -141,6 +207,9 @@ def plot_prediction_errors(
     ashp_params: ASHPParams,
     label: str = "train",
     output_dir: Optional[Path] = None,
+    ua_loss: np.ndarray | None = None,
+    sampling_minutes: int = 5,
+    ua_adj: np.ndarray | None = None,
 ) -> Optional[Path]:
     """4-panel time-series plot of one-step-ahead prediction error per node.
 
@@ -151,6 +220,13 @@ def plot_prediction_errors(
     ashp_params : ASHPParams
     label : str
     output_dir : Path, optional
+    ua_loss : array (4,)
+        Per-node UA to ambient [kW/K].  Falls back to params.UA_loss.
+    sampling_minutes : int
+        Interval cadence [minutes].
+    ua_adj : array (3,), optional
+        Inter-node conductances [kW/K].  Passed to _prepare_inputs for the
+        bottom-boundary correction on back-calculated Q_ashp.
 
     Returns
     -------
@@ -160,9 +236,13 @@ def plot_prediction_errors(
         logger.warning("matplotlib not available; skipping plots.")
         return None
 
-    inputs = _prepare_inputs(df, ashp_params)
+    if ua_loss is None:
+        ua_loss = params.UA_loss
+    dt_s = sampling_minutes * 60.0
+    inputs = _prepare_inputs(df, ashp_params, ua_loss=ua_loss,
+                             sampling_minutes=sampling_minutes, ua_adj=ua_adj)
     T_meas = inputs["T_meas"]
-    T_pred = _one_step_ahead(inputs, params)
+    T_pred = _one_step_ahead(inputs, params, dt_s=dt_s)
     errors = T_pred - T_meas[1:]
 
     time_idx = df.index[1:]

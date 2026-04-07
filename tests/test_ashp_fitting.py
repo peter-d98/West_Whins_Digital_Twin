@@ -296,9 +296,9 @@ class TestOutputSchema:
             pytest.skip("Fitting returned error (insufficient data)")
 
         required_keys = [
-            "n_intervals_accepted",
-            "n_intervals_q_positive",
-            "n_windows",
+            "n_windows_total",
+            "n_windows_accepted",
+            "n_intervals_total",
             "thresholds",
             "ua_loss_used",
             "timestamp",

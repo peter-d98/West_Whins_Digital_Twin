@@ -387,7 +387,7 @@ def _back_calc_30min(
     return Q_back
 
 
-def prepare_inputs(df: pd.DataFrame, ashp_p: ashp_model.ASHPParams, dt_h: float = 0.5) -> dict:
+def prepare_inputs(df: pd.DataFrame, ashp_p: ashp_model.ASHPParams, dt_h: float = 5 / 60) -> dict:
     """Build arrays needed for tank simulation from a cleaned DataFrame.
 
     Returns dict with keys: T_meas (N,4), Q_st, Q_ashp, Q_imm, T_amb (all N,).
@@ -426,6 +426,7 @@ def fit_tank_params(
     *,
     max_nfev: int = 300,
     reg_weight: float = 0.01,
+    dt_s: float = 300.0,
 ) -> tank_model.TankParams:
     """Fit tank parameters using one-step-ahead (teacher-forced) residuals.
 
@@ -457,7 +458,7 @@ def fit_tank_params(
             T_pred[k] = tank_model.tank_step(
                 T_meas[k],
                 float(Q_st[k]), float(Q_ashp[k]),
-                float(Q_imm[k]), float(T_amb[k]), p,
+                float(Q_imm[k]), float(T_amb[k]), p, dt_s=dt_s,
             )
         err = (T_pred - T_meas[1: steps + 1]).ravel()
         # Regularisation toward defaults
@@ -482,6 +483,7 @@ def run_identification(
     train_frac: float = 0.7,
     max_nfev: int = 300,
     ashp_params_path: Path | None = None,
+    dt_s: float = 300.0,
 ) -> tuple[IdentificationResult, pd.DataFrame, pd.DataFrame]:
     """Full identification pipeline.
 
@@ -512,7 +514,7 @@ def run_identification(
     """
     # Compute ST energy column
     df = df.copy()
-    df["st_kwh"] = solar_thermal.compute_st_energy(df)
+    df["st_kwh"] = solar_thermal.compute_st_energy(df, dt_minutes=dt_s / 60.0)
 
     # Train/val split by time
     split_idx = int(len(df) * train_frac)
@@ -526,9 +528,11 @@ def run_identification(
         # Load pre-fitted ASHP params from JSON (e.g. from run_ashp_1min.py)
         with open(ashp_params_path, "r") as fh:
             ashp_data = json.load(fh)
+        ashp_d = ashp_data["ashp"]
         ashp_p = ashp_model.ASHPParams(
-            a=np.array(ashp_data["ashp"]["a"]),
-            b=np.array(ashp_data["ashp"]["b"]),
+            c=np.array(ashp_d["c"]) if "c" in ashp_d else None,
+            a=np.array(ashp_d["a"]),
+            b=np.array(ashp_d["b"]),
         )
         logger.info(
             "Loaded pre-fitted ASHP params from %s (skipping ASHP map fitting).",
@@ -554,7 +558,7 @@ def run_identification(
         )
 
         # Pass 2: back-calculate heat and re-fit both a and b
-        Q_back = back_calculate_ashp_heat(df_train)
+        Q_back = back_calculate_ashp_heat(df_train, dt_s=dt_s)
         if Q_back.notna().sum() >= 50:
             ashp_p = ashp_model.fit_ashp_maps(
                 T_out=df_train["t_out_c"].values,
@@ -568,8 +572,8 @@ def run_identification(
                            "fallback to a = b * 3.0 retained.")
 
     # Step 2: Fit tank on training data
-    train_inputs = prepare_inputs(df_train, ashp_p)
-    tank_p = fit_tank_params(train_inputs, max_nfev=max_nfev)
+    train_inputs = prepare_inputs(df_train, ashp_p, dt_h=dt_s / 3600.0)
+    tank_p = fit_tank_params(train_inputs, max_nfev=max_nfev, dt_s=dt_s)
 
     result = IdentificationResult(
         tank_params=tank_p,

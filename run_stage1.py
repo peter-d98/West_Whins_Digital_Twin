@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 
 from src import data_loader
-from src.ashp_model import ASHPParams, predict_capacity, sink_proxy
+from src.ashp_model import ASHPParams, predict_cop, sink_proxy
 from src.solar_thermal import compute_st_energy
 from src.tank_model import TankParams, simulate
 
@@ -89,6 +89,7 @@ def _load_priors(
     with open(ashp_path, "r", encoding="utf-8") as f:
         adata = json.load(f)
     ashp_params = ASHPParams(
+        c=np.array(adata["ashp"]["c"], dtype=float) if "c" in adata["ashp"] else None,
         a=np.array(adata["ashp"]["a"], dtype=float),
         b=np.array(adata["ashp"]["b"], dtype=float),
     )
@@ -96,8 +97,11 @@ def _load_priors(
     return tank_params, ashp_params
 
 
-def _prepare_inputs(df, ashp_params: ASHPParams, dt_h: float = 0.5) -> dict:
+def _prepare_inputs(df, ashp_params: ASHPParams, dt_h: float | None = None,
+                    sampling_minutes: int = 5) -> dict:
     """Build arrays needed for simulation."""
+    if dt_h is None:
+        dt_h = sampling_minutes / 60.0
     T_meas = df[["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c"]].values
 
     if "st_kwh" in df.columns:
@@ -107,10 +111,10 @@ def _prepare_inputs(df, ashp_params: ASHPParams, dt_h: float = 0.5) -> dict:
 
     T_sink = sink_proxy(df["tank_mid_c"].values, df["tank_top_c"].values)
     T_out = df["t_out_c"].fillna(df["t_out_c"].median()).values
-    cap_kw = predict_capacity(T_out, T_sink, ashp_params)
+    cop = predict_cop(T_out, T_sink, ashp_params)
     P_meas = df["ashp_inst_kwh"].fillna(0).values
-    ashp_on = P_meas > 0.05
-    Q_ashp = np.where(ashp_on, cap_kw * dt_h, 0.0)
+    ashp_on = P_meas > 0.016
+    Q_ashp = np.where(ashp_on, P_meas * cop, 0.0)
 
     Q_imm = df["imm_tot_inst_kwh"].fillna(0).values
     T_amb = df["t_amb_c"].fillna(df["t_amb_c"].median()).values
@@ -120,10 +124,12 @@ def _prepare_inputs(df, ashp_params: ASHPParams, dt_h: float = 0.5) -> dict:
 
 def _evaluate_split(
     df, tank_params: TankParams, ashp_params: ASHPParams, label: str,
+    sampling_minutes: int = 5,
 ) -> dict:
     """Simulate and compute per-node RMSE and MAE."""
-    inputs = _prepare_inputs(df, ashp_params)
+    inputs = _prepare_inputs(df, ashp_params, sampling_minutes=sampling_minutes)
     T_meas = inputs["T_meas"]
+    dt_s = sampling_minutes * 60.0
 
     T_hist = simulate(
         T_meas[0],
@@ -132,6 +138,7 @@ def _evaluate_split(
         inputs["Q_imm"],
         inputs["T_amb"],
         tank_params,
+        dt_s,
     )
 
     # T_hist has shape (N+1, 4), compare T_hist[1:] vs T_meas[1:]
@@ -175,8 +182,8 @@ def main(
     ashp_path: Path | None = None,
     global_path: Path | None = None,
 ) -> dict:
-    csv_path    = csv_path    or ROOT / "data" / "FullDS_Findhorn.csv"
-    yaml_path   = yaml_path   or ROOT / "column_mapping.yaml"
+    csv_path    = csv_path    or ROOT / "data" / "FullDS_Findhorn_5min.csv"
+    yaml_path   = yaml_path   or ROOT / "column_mapping_5min.yaml"
     output_dir  = output_dir  or ROOT / "output"
     ua_path     = ua_path     or _UA_FIT_PATH
     ashp_path   = ashp_path   or _ASHP_FIT_PATH
@@ -194,14 +201,17 @@ def main(
 
     # ---- Load & clean data ------------------------------------------------
     logger.info("Loading data from %s", csv_path)
-    df = data_loader.load_and_clean(csv_path, yaml_path)
+    cfg = data_loader.load_column_mapping(yaml_path)
+    sampling_minutes = cfg.get("assumptions", {}).get("sampling_minutes", 5)
+    df = data_loader.load_and_clean(csv_path, yaml_path,
+                                    sampling_minutes=sampling_minutes)
 
     tank_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c"]
     df = df.dropna(subset=tank_cols, how="all")
     logger.info("After dropping all-NaN tank rows: %d rows", len(df))
 
     # Compute ST energy
-    df["st_kwh"] = compute_st_energy(df)
+    df["st_kwh"] = compute_st_energy(df, dt_minutes=float(sampling_minutes))
 
     # ---- Node-ordering diagnostic -----------------------------------------
     ordering = data_loader.node_ordering_check(df)
@@ -214,8 +224,10 @@ def main(
     logger.info("Train: %d rows, Val: %d rows", len(df_train), len(df_val))
 
     # ---- Evaluate ---------------------------------------------------------
-    summary_train = _evaluate_split(df_train, tank_params, ashp_params, "train")
-    summary_val = _evaluate_split(df_val, tank_params, ashp_params, "validation")
+    summary_train = _evaluate_split(df_train, tank_params, ashp_params, "train",
+                                    sampling_minutes=sampling_minutes)
+    summary_val = _evaluate_split(df_val, tank_params, ashp_params, "validation",
+                                  sampling_minutes=sampling_minutes)
 
     summary = {"train": summary_train, "val": summary_val}
     summary_file = output_dir / "summary.json"

@@ -72,6 +72,7 @@ def _make_ashp_json(path: Path) -> None:
     """Write a plausible ashp_fit.json."""
     data = {
         "ashp": {
+            "c": [3.0, 0.05, -0.02, 0.0],
             "a": [8.0, 0.1, -0.05, 0.0],
             "b": [3.0, -0.02, 0.03, 0.0],
         }
@@ -106,7 +107,7 @@ class TestConfig:
         assert cfg.max_nfev == 500
         assert isinstance(cfg.free_ua_loss_bottom, bool)
         assert cfg.ua_adj_bounds == [0.0, 0.5]
-        assert cfg.draw_delta_c == -1.0
+        assert cfg.draw_delta_c == -0.5
         assert cfg.ua_fit_path == Path("UA_fitting/output/ua_fit.json")
         assert cfg.ashp_fit_path == Path("ASHP_fitting/output/ashp_fit.json")
         assert cfg.free_f_ashp is False

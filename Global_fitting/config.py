@@ -29,8 +29,9 @@ class GlobalFitConfig:
     max_nfev : int
         Maximum function evaluations for ``scipy.optimize.least_squares``.
     free_ua_loss_bottom : bool
-        If True, ``UA_loss[0]`` is free within ``[-0.008, 0.004]``.
-        If False, it is frozen at its prior value from ua_fit.json.
+        If True (default), ``UA_loss[0]`` is free within ``[-0.008, 0.004]``,
+        warm-started from its prior value in ua_fit.json.
+        If False, it is frozen at its prior value.
     ua_adj_bounds : List[float]
         Lower and upper bounds for each ``UA_adj`` element [kW/K].
     draw_delta_c : float
@@ -38,13 +39,19 @@ class GlobalFitConfig:
         this value (default -1.0 °C) are flagged as draw events and excluded
         from the least-squares residual.  Set to a large negative value (e.g.
         -999) to disable draw masking.
-    free_f_ashp : bool
-        If True, the ASHP heat-distribution fractions for mid and mid-hi are
-        free parameters: ``f_ashp = [0, a, b, 1-a-b]`` with ``a, b ≥ 0`` and
-        ``a + b ≤ 1``.  If False, ``f_ashp`` is frozen at ``[0, 0, 0, 1]``.
-    f_ashp_mid_bounds : List[float]
-        Lower and upper bounds for *a* (mid fraction) and *b* (mid-hi fraction)
-        when ``free_f_ashp=True``.  Both parameters share these bounds.
+    collapse_mid_rising_c : float
+        Steps where ``tank_mid_c`` rises by more than this value [°C] between
+        consecutive intervals are flagged as ASHP collapse events and excluded
+        from the OSA residual.  These are the steps where the HX circulation
+        pump causes sudden stratification redistribution; the model has no
+        representation of this transient and the steps would otherwise bias
+        ``UA_adj`` upward.  Default 2.0 °C matches ``mid_rising_c`` in
+        ``ASHPFitConfig``.
+    ashp_off_kwh : float
+        ASHP is considered idle when ``Q_ashp < ashp_off_kwh`` [kWh].  Used
+        together with ``collapse_mid_rising_c`` to identify collapse steps
+        (mid rises sharply but no ASHP power is yet drawn).  Default 0.016 kWh
+        matches ``ashp_off_kwh`` in ``ASHPFitConfig``.
     """
 
     ua_fit_path: Path = field(
@@ -54,15 +61,16 @@ class GlobalFitConfig:
         default_factory=lambda: Path("ASHP_fitting/output/ashp_fit.json")
     )
     data_csv: Path = field(
-        default_factory=lambda: Path("data/FullDS_Findhorn.csv")
+        default_factory=lambda: Path("data/FullDS_Findhorn_5min.csv")
     )
     column_mapping_yaml: Path = field(
-        default_factory=lambda: Path("column_mapping.yaml")
+        default_factory=lambda: Path("column_mapping_5min.yaml")
     )
+    sampling_minutes: int = 5
     train_frac: float = 0.7
     max_nfev: int = 500
-    free_ua_loss_bottom: bool = False
+    free_ua_loss_bottom: bool = True
     ua_adj_bounds: List[float] = field(default_factory=lambda: [0.0, 0.5])
-    draw_delta_c: float = -1.0
-    free_f_ashp: bool = False
-    f_ashp_mid_bounds: List[float] = field(default_factory=lambda: [0.0, 1.0])
+    draw_delta_c: float = -0.25
+    collapse_mid_rising_c: float = 2.0
+    ashp_off_kwh: float = 0.016

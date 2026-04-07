@@ -45,7 +45,7 @@ def node_rmses(T_meas: np.ndarray, T_sim: np.ndarray) -> dict[str, float]:
 def cop_errors(
     df: pd.DataFrame,
     ashp_p: ashp_model.ASHPParams,
-    dt_h: float = 0.5,
+    dt_h: float = 5 / 60,
     Q_back: pd.Series = None
 ) -> dict[str, float]:
     """
@@ -102,7 +102,7 @@ def cop_errors(
 def ashp_performance_kpis(
     df: pd.DataFrame,
     ashp_p: ashp_model.ASHPParams,
-    dt_h: float = 0.5,
+    dt_h: float = 5 / 60,
 ) -> dict[str, float]:
     """Compute ASHP performance KPIs over the evaluation period.
 
@@ -159,7 +159,7 @@ def ashp_performance_kpis(
 def compute_ashp_kpis(
     df: pd.DataFrame,
     ashp_p: ashp_model.ASHPParams,
-    dt_h: float = 0.5,
+    dt_h: float = 5 / 60,
 ) -> dict:
     """Compute ASHP seasonal performance metrics.
 
@@ -237,6 +237,7 @@ def energy_balance_residual(
     Q_imm: np.ndarray,
     T_amb: np.ndarray,
     params: tank_model.TankParams,
+    dt_s: float = 300.0,
 ) -> float:
     """Return total energy-balance residual [kWh] over the period.
 
@@ -249,7 +250,6 @@ def energy_balance_residual(
     E_in = np.nansum(Q_st) + np.nansum(Q_ashp) + np.nansum(Q_imm)
 
     # Approximate total losses
-    dt_s = 1800.0
     E_loss = 0.0
     for i in range(4):
         avg_dT = np.nanmean(T_meas[:, i] - T_amb)
@@ -266,6 +266,7 @@ def _one_step_ahead(
     Q_imm: np.ndarray,
     T_amb: np.ndarray,
     params: tank_model.TankParams,
+    dt_s: float = 300.0,
 ) -> np.ndarray:
     """One-step-ahead prediction: each step resets to the measured state.
 
@@ -278,7 +279,7 @@ def _one_step_ahead(
             T_meas[k],
             float(Q_st[k]), float(Q_ashp[k]),
             float(Q_imm[k]), float(T_amb[k]),
-            params,
+            params, dt_s=dt_s,
         )
     return T_pred
 
@@ -290,6 +291,7 @@ def evaluate(
     label: str = "validation",
     plot_dir: Path | None = None,
     Q_back: pd.Series = None,
+    dt_s: float = 300.0,
 ) -> dict:
     """
     Run the full evaluation on a DataFrame slice.
@@ -299,7 +301,7 @@ def evaluate(
     If Q_back is not provided, it is computed using back_calculate_ashp_heat.
     Returns a summary dict and optionally saves plots.
     """
-    inputs = identification.prepare_inputs(df, id_result.ashp_params)
+    inputs = identification.prepare_inputs(df, id_result.ashp_params, dt_h=dt_s / 3600.0)
     T_meas = inputs["T_meas"]
 
     # One-step-ahead prediction
@@ -310,18 +312,20 @@ def evaluate(
         inputs["Q_imm"],
         inputs["T_amb"],
         id_result.tank_params,
+        dt_s=dt_s,
     )
 
     if Q_back is None:
-        Q_back = identification.back_calculate_ashp_heat(df)
+        Q_back = identification.back_calculate_ashp_heat(df, dt_s=dt_s)
 
     rmses    = node_rmses(T_meas[1:], T_sim)
-    cop_err  = cop_errors(df, id_result.ashp_params, Q_back=Q_back)
-    ashp_kpis = compute_ashp_kpis(df, id_result.ashp_params)
+    cop_err  = cop_errors(df, id_result.ashp_params, dt_h=dt_s / 3600.0, Q_back=Q_back)
+    ashp_kpis = compute_ashp_kpis(df, id_result.ashp_params, dt_h=dt_s / 3600.0)
     ordering = node_ordering_rate(T_sim)
     e_resid = energy_balance_residual(
         T_meas, inputs["Q_st"], inputs["Q_ashp"],
         inputs["Q_imm"], inputs["T_amb"], id_result.tank_params,
+        dt_s=dt_s,
     )
 
     summary = {

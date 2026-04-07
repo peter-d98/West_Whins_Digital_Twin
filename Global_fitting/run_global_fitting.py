@@ -67,8 +67,8 @@ def _parse_args() -> argparse.Namespace:
         description="Fit global tank parameters (UA_adj + optionally UA_loss[0]) "
                     "using frozen UA and ASHP priors.",
     )
-    p.add_argument("--csv", required=True, help="Path to the 30-min cleaned CSV.")
-    p.add_argument("--yaml", required=True, help="Path to column_mapping.yaml.")
+    p.add_argument("--csv", required=True, help="Path to the cleaned CSV (e.g. data/FullDS_Findhorn_5min.csv).")
+    p.add_argument("--yaml", required=True, help="Path to column_mapping YAML (e.g. column_mapping_5min.yaml).")
     p.add_argument("--ua-json", type=str, default=None,
                    help="Path to ua_fit.json (default: UA_fitting/output/ua_fit.json).")
     p.add_argument("--ashp-json", type=str, default=None,
@@ -79,8 +79,6 @@ def _parse_args() -> argparse.Namespace:
                    help="Max function evaluations (default 500).")
     p.add_argument("--freeze-ua-loss-bottom", action="store_true",
                    help="Freeze UA_loss[0] at its prior value (default: free).")
-    p.add_argument("--free-f-ashp", action="store_true",
-                   help="Free f_ashp mid/mid-hi fractions: f_ashp=[0,a,b,1-a-b].")
     p.add_argument("--plot", action="store_true",
                    help="Generate diagnostic plots of prediction errors.")
     return p.parse_args()
@@ -101,8 +99,6 @@ def _build_config(args: argparse.Namespace) -> GlobalFitConfig:
         cfg.max_nfev = args.max_nfev
     if args.freeze_ua_loss_bottom:
         cfg.free_ua_loss_bottom = False
-    if args.free_f_ashp:
-        cfg.free_f_ashp = True
     return cfg
 
 
@@ -130,7 +126,7 @@ def main() -> int:
 
     # -- 1. Validate priors exist (fail early) --------------------------------
     try:
-        _load_ua_priors(cfg.ua_fit_path)
+        ua_loss, ua_adj = _load_ua_priors(cfg.ua_fit_path)
         ashp_params = _load_ashp_priors(cfg.ashp_fit_path)
     except (FileNotFoundError, ValueError) as exc:
         logger.error("%s", exc)
@@ -142,12 +138,13 @@ def main() -> int:
 
     logger.info("Fitted UA_adj: %s", result.tank_params.UA_adj.tolist())
     logger.info("Final UA_loss: %s", result.tank_params.UA_loss.tolist())
-    logger.info("Fitted f_ashp: %s", result.tank_params.f_ashp.tolist())
+    logger.info("Fixed f_ashp (from ashp_fit.json): %s", result.tank_params.f_ashp.tolist())
 
     # -- 3. Evaluate on train and validation ----------------------------------
     logger.info("Loading data for evaluation ...")
-    df = load_and_clean(cfg.data_csv, cfg.column_mapping_yaml)
-    df["st_kwh"] = compute_st_energy(df)
+    df = load_and_clean(cfg.data_csv, cfg.column_mapping_yaml,
+                        sampling_minutes=cfg.sampling_minutes)
+    df["st_kwh"] = compute_st_energy(df, dt_minutes=float(cfg.sampling_minutes))
     tank_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c"]
     df = df.dropna(subset=tank_cols, how="all")
 
@@ -155,8 +152,12 @@ def main() -> int:
     df_train = df.iloc[:split_idx]
     df_val = df.iloc[split_idx:]
 
-    summary_train = evaluate_split(df_train, result.tank_params, ashp_params, "train")
-    summary_val = evaluate_split(df_val, result.tank_params, ashp_params, "validation")
+    summary_train = evaluate_split(df_train, result.tank_params, ashp_params, "train",
+                                    ua_loss=ua_loss, sampling_minutes=cfg.sampling_minutes,
+                                    ua_adj=ua_adj)
+    summary_val = evaluate_split(df_val, result.tank_params, ashp_params, "validation",
+                                  ua_loss=ua_loss, sampling_minutes=cfg.sampling_minutes,
+                                  ua_adj=ua_adj)
 
     # -- 4. Save output JSON --------------------------------------------------
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -187,10 +188,12 @@ def main() -> int:
     if args.plot:
         logger.info("Generating diagnostic plots ...")
         plot_prediction_errors(
-            df_train, result.tank_params, ashp_params, "train", _PLOT_DIR
+            df_train, result.tank_params, ashp_params, "train", _PLOT_DIR,
+            ua_loss=ua_loss, sampling_minutes=cfg.sampling_minutes, ua_adj=ua_adj,
         )
         plot_prediction_errors(
-            df_val, result.tank_params, ashp_params, "validation", _PLOT_DIR
+            df_val, result.tank_params, ashp_params, "validation", _PLOT_DIR,
+            ua_loss=ua_loss, sampling_minutes=cfg.sampling_minutes, ua_adj=ua_adj,
         )
 
     logger.info("Global fitting pipeline complete.")
