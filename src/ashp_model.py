@@ -144,23 +144,50 @@ def fit_ashp_maps(
         # Clip implausible COPs before fitting
         COP_meas = np.clip(COP_meas, 0.5, 8.0)
 
-        Xc = np.column_stack([np.ones(len(T_a_q)), T_a_q, T_s_q, T_a_q * T_s_q])
-        c_ols, _, _, _ = np.linalg.lstsq(Xc, COP_meas, rcond=None)
-        c_lo = np.array([-10.0, -0.5, -0.5, -0.02])
-        c_hi = np.array([20.0,   0.5,  0.5,  0.02])
-        c_init = np.clip(c_ols, c_lo + 1e-6, c_hi - 1e-6)
+        # Center T_a and T_s to reduce the condition number of the design matrix.
+        # T_sink is structurally narrow in this dataset (thermostat cycling keeps
+        # it within ~6 °C of the mean), making the raw bilinear matrix ill-conditioned
+        # (κ ~50k).  Centering reduces κ to ~5 and prevents the solver hitting the
+        # c[0] upper bound due to the large T_sink level (≈49 °C).
+        mu_a = float(np.mean(T_a_q))
+        mu_s = float(np.mean(T_s_q))
+        T_a_c = T_a_q - mu_a
+        T_s_c = T_s_q - mu_s
 
-        def cop_residuals(c):
-            pred = Xc @ c
+        Xc = np.column_stack([np.ones(len(T_a_c)), T_a_c, T_s_c, T_a_c * T_s_c])
+        a_ols, _, _, _ = np.linalg.lstsq(Xc, COP_meas, rcond=None)
+
+        # Bounds in centered space.
+        # a[0]: COP at mean (T_out, T_sink)  — expected 1.5–6.0
+        # a[1]: dCOP/dT_out                  — expected ~+0.03/°C
+        # a[2]: dCOP/dT_sink                 — expected −0.05 to −0.15/°C
+        #        (manufacturer data); capped at −0.20 to limit extrapolation error
+        # a[3]: bilinear interaction in centered space
+        a_lo = np.array([0.5, -0.5, -0.20, -0.02])
+        a_hi = np.array([7.0,  0.5,  0.05,  0.02])
+        a_init = np.clip(a_ols, a_lo + 1e-6, a_hi - 1e-6)
+
+        def cop_residuals(a):
+            pred = Xc @ a
             pred = np.maximum(pred, 0.1)
             return pred - COP_meas
 
         res_c = least_squares(
-            cop_residuals, c_init,
-            bounds=(c_lo, c_hi),
+            cop_residuals, a_init,
+            bounds=(a_lo, a_hi),
             loss="soft_l1",
         )
-        params.c = res_c.x
+        a_fit = res_c.x
+        # Transform centered coefficients back to uncentered:
+        # COP = a0 + a1*(T_a−µa) + a2*(T_s−µs) + a3*(T_a−µa)(T_s−µs)
+        #     = c0 + c1*T_a + c2*T_s + c3*T_a*T_s
+        a0, a1, a2, a3 = a_fit
+        params.c = np.array([
+            a0 - a1 * mu_a - a2 * mu_s + a3 * mu_a * mu_s,
+            a1 - a3 * mu_s,
+            a2 - a3 * mu_a,
+            a3,
+        ])
         logger.info("ASHP COP map coefficients: %s", params.c)
     else:
         # Default COP map when no Q data available
