@@ -124,8 +124,14 @@ def _build_config(args: argparse.Namespace) -> ASHPFitConfig:
     return cfg
 
 
-def _load_ua_priors(ua_json_path: Path) -> np.ndarray:
-    """Load UA_loss priors from ua_fit.json.  Fail loudly if missing."""
+def _load_ua_priors(ua_json_path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """Load UA_loss and UA_adj priors from ua_fit.json.  Fail loudly if missing.
+
+    Returns
+    -------
+    ua_loss : np.ndarray, shape (4,)
+    ua_adj  : np.ndarray, shape (3,)  — may be zeros if key absent
+    """
     if not ua_json_path.exists():
         raise FileNotFoundError(
             f"UA priors file not found: {ua_json_path}\n"
@@ -142,8 +148,17 @@ def _load_ua_priors(ua_json_path: Path) -> np.ndarray:
             f"Expected UA_loss array of shape (4,), got {ua_loss.shape} "
             f"from {ua_json_path}"
         )
+
+    ua_adj = np.array(ua_data.get("UA_adj", [0.0, 0.0, 0.0]), dtype=float)
+    if ua_adj.shape != (3,):
+        raise ValueError(
+            f"Expected UA_adj array of shape (3,), got {ua_adj.shape} "
+            f"from {ua_json_path}"
+        )
+
     logger.info("Loaded UA_loss priors: %s from %s", ua_loss.tolist(), ua_json_path)
-    return ua_loss
+    logger.info("Loaded UA_adj priors:  %s from %s", ua_adj.tolist(), ua_json_path)
+    return ua_loss, ua_adj
 
 
 def main() -> int:
@@ -160,7 +175,7 @@ def main() -> int:
     # -- 1. Load UA priors (fail early if missing) ---------------------------
     ua_json_path = Path(args.ua_json) if args.ua_json else _DEFAULT_UA_JSON
     try:
-        ua_loss = _load_ua_priors(ua_json_path)
+        ua_loss, ua_adj = _load_ua_priors(ua_json_path)
     except (FileNotFoundError, ValueError) as exc:
         logger.error("%s", exc)
         return 1
@@ -189,19 +204,18 @@ def main() -> int:
 
     # -- 5. Fit ASHP maps (back-calc + fitting) ------------------------------
     logger.info("Fitting ASHP maps from %d windows ...", len(windows))
-    result = fit_ashp(df, windows, ua_loss, cfg, output_dir=_OUTPUT_DIR)
+    result = fit_ashp(df, windows, ua_loss, cfg, ua_adj=ua_adj, output_dir=_OUTPUT_DIR)
 
     if "error" in result.get("identification", {}):
         logger.error("ASHP fitting failed: %s", result["identification"]["error"])
         return 1
 
-    logger.info("Fitted ASHP capacity coefficients (a): %s", result["ashp"]["a"])
-    logger.info("Fitted ASHP power coefficients (b):    %s", result["ashp"]["b"])
+    logger.info("Fitted ASHP COP coefficients (c): %s", result["ashp"]["c"])
 
     # -- 6. Save back-calculation details CSV --------------------------------
     n_train = int(len(df) * cfg.train_frac)
     df_train = df.iloc[:n_train]
-    bc_df = back_calculate_q_ashp(df_train, windows, ua_loss, cfg)
+    bc_df = back_calculate_q_ashp(df_train, windows, ua_loss, cfg, ua_adj=ua_adj)
     bc_path = _DIAG_DIR / "backcalc_details.csv"
     write_backcalc_csv(bc_df, output_path=bc_path)
 

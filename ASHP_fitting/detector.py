@@ -101,11 +101,13 @@ def detect_ashp_windows(
         df_train.index.min(), df_train.index.max(), len(df_train),
     )
 
-    # -- Step 2: Build boolean masks for each condition ----------------------
+    # -- Step 2: Build per-interval condition masks --------------------------
     ashp_on = df_train["ashp_inst_kwh"].fillna(0.0) > cfg.ashp_off_kwh
     st_off = df_train[_ST_COL].fillna(0.0) <= cfg.st_off_kwh
     imm_off = df_train["imm_tot_inst_kwh"].fillna(0.0) <= cfg.imm_off_kwh
-    hx_on = df_train["tank_top_c"].diff().fillna(0.0) > cfg.sh_off_c
+    mid_diff = df_train["tank_mid_c"].diff().fillna(0.0)
+    # Mid-node temperature rise flag: used to OPEN a new window.
+    mid_start = mid_diff > cfg.mid_rising_c
 
     logger.info(
         "ASHP-on intervals: %d / %d (%.1f%%)",
@@ -129,8 +131,55 @@ def detect_ashp_windows(
     is_draw = bottom_diff < cfg.draw_delta_c
     logger.info("Draw events in training data: %d", is_draw.sum())
 
-    # -- Step 5: Combine into per-interval accepted mask ---------------------
-    accepted = ashp_on & st_off & imm_off & hx_on & ~has_nan & has_finite_pair & ~is_draw
+    # -- Step 5: Detector accepted mask -------------------------------------
+    # OPEN:     mid_diff > mid_rising_c  AND all guards EXCEPT ashp_on.
+    #           The stratification-collapse spike that fires when the HX pump
+    #           starts often precedes measurable ASHP electricity draw by one
+    #           5-min step, so ashp_on is NOT required to open a window.
+    # CONTINUE: ashp_on AND all guards (no mid_diff test).  The ASHP on-signal
+    #           is the ground truth for whether the heat pump is running.
+    # CLOSE:    ashp_on falls below threshold, any guard fails, OR (after
+    #           accepting the current interval) all three upper nodes have
+    #           reached the setpoint — whichever occurs first.
+    guards_no_ashp = (
+        st_off.values
+        & imm_off.values
+        & (~has_nan).values
+        & has_finite_pair.values
+        & (~is_draw).values
+    )
+    guards_with_ashp = ashp_on.values & guards_no_ashp
+    mid_start_arr = mid_start.values
+
+    # Setpoint check: all three upper nodes >= setpoint_c at end of interval k.
+    # T was computed in Step 3 from cfg.node_cols.
+    at_setpoint = (
+        (T[:, 1] >= cfg.setpoint_c)
+        & (T[:, 2] >= cfg.setpoint_c)
+        & (T[:, 3] >= cfg.setpoint_c)
+    )
+
+    n = len(df_train)
+    accepted_arr = np.zeros(n, dtype=bool)
+    trigger_open = False
+    for k in range(n):
+        if not trigger_open:
+            if guards_no_ashp[k] and mid_start_arr[k]:
+                trigger_open = True
+                accepted_arr[k] = True
+                # Close immediately if setpoint already reached (rare edge case)
+                if at_setpoint[k]:
+                    trigger_open = False
+        else:
+            if guards_with_ashp[k]:
+                accepted_arr[k] = True
+                # Close after this interval if all upper nodes at setpoint
+                if at_setpoint[k]:
+                    trigger_open = False
+            else:
+                trigger_open = False
+
+    accepted = pd.Series(accepted_arr, index=df_train.index)
 
     # -- Step 6: Build per-interval diagnostics DataFrame --------------------
     diag = pd.DataFrame({
@@ -138,45 +187,47 @@ def detect_ashp_windows(
         "ashp_on": ashp_on.values,
         "st_off": st_off.values,
         "imm_off": imm_off.values,
-        "hx_on": hx_on.values,
+        "mid_start": mid_start.values,
+        "at_setpoint": at_setpoint,
         "no_nan": (~has_nan).values,
         "finite_pair": has_finite_pair.values,
         "no_draw": (~is_draw).values,
-        "accepted": accepted.values,
+        "accepted": accepted_arr,
     })
 
-    # Assign rejection reason (first failing condition)
+    # Assign rejection reason (first failing condition; mid_start is used for
+    # intervals where the trigger was never opened — mid_continue for intervals
+    # where an open trigger was not sustained).
     reasons = []
     for _, row in diag.iterrows():
         if row["accepted"]:
             reasons.append("")
             continue
-        if not row["ashp_on"]:
-            reasons.append("ashp_off")
-        elif not row["st_off"]:
+        if not row["st_off"]:
             reasons.append("st_on")
         elif not row["imm_off"]:
             reasons.append("imm_on")
-        elif not row["hx_on"]:
-            reasons.append("hx_off")
         elif not row["no_nan"]:
             reasons.append("has_nan")
         elif not row["finite_pair"]:
             reasons.append("no_finite_pair")
         elif not row["no_draw"]:
             reasons.append("draw_event")
+        elif not row["mid_start"]:
+            reasons.append("mid_not_rising")
+        elif not row["ashp_on"]:
+            reasons.append("ashp_off")
         else:
             reasons.append("unknown")
     diag["reject_reason"] = reasons
 
-    n_accepted = accepted.sum()
+    n_accepted = int(accepted_arr.sum())
     logger.info(
         "Accepted ASHP-only intervals: %d / %d (%.1f%%)",
         n_accepted, len(df_train), 100.0 * n_accepted / len(df_train),
     )
 
     # -- Step 7: Segment contiguous accepted intervals into windows ----------
-    accepted_arr = accepted.values
     windows: List[ASHPWindow] = []
     wid = 0
 

@@ -24,15 +24,23 @@ class ASHPFitConfig:
     train_frac : float
         Fraction of the time-ordered dataset to use for fitting (0–1).
     ashp_off_kwh : float
-        ASHP is considered OFF when ``ashp_inst_kwh <= ashp_off_kwh`` [kWh].
-        Used to detect *non*-ASHP intervals.  Intervals where ASHP is above
-        this threshold are candidates for ASHP-only windows.
+        ASHP is considered ON during *continuation* when
+        ``ashp_inst_kwh > ashp_off_kwh`` [kWh].  Not required to open a
+        window — the stratification-collapse spike that fires when the HX
+        pump starts often precedes measurable ASHP electricity draw by one
+        5-min step.
     st_off_kwh : float
         Solar-thermal is OFF when ``st_kwh <= st_off_kwh`` [kWh].
     imm_off_kwh : float
         Immersion is OFF when ``imm_tot_inst_kwh <= imm_off_kwh`` [kWh].
-    sh_off_c : float
-        SH is considered OFF when change in top-node temp > sh_off [°C] per interval.
+    mid_rising_c : float
+        Minimum rise in ``tank_mid_c`` between consecutive samples [°C] to
+        OPEN a new window.  Set at 2.0 °C/step to capture only the
+        unambiguous stratification-collapse burst at ASHP startup.
+    setpoint_c : float
+        DHW setpoint temperature [°C].  A window is closed after the first
+        interval in which all three upper nodes (mid, mid-hi, top) reach
+        or exceed this temperature.  Default 55.0 °C.
     draw_delta_c : float
         Maximum allowed drop in ``tank_bottom_c`` between consecutive samples
         to NOT flag a draw event [°C].  Default -1.0 (a drop > 1 °C is a draw).
@@ -51,22 +59,26 @@ class ASHPFitConfig:
     """
 
     # --- data cadence -------------------------------------------------------
-    sampling_minutes: int = 30
+    sampling_minutes: int = 5
 
     # --- train/val split ----------------------------------------------------
     train_frac: float = 0.7
 
     # --- ASHP-only interval detection thresholds ----------------------------
-    ashp_off_kwh: float = 0.013     # kWh per interval — below = ASHP off
-    st_off_kwh: float = 0.05        # kWh per interval — below = ST off
-    imm_off_kwh: float = 0.01       # kWh per interval — below = immersion off
-    sh_off_c: float = 1.0           # °C per interval — above = SH off
+    ashp_off_kwh: float = 0.016    # kWh per interval — below = ASHP off (continuation gate)
+    st_off_kwh: float = 0.001      # kWh per interval — below = ST off
+    imm_off_kwh: float = 0.001     # kWh per interval — below = immersion off
+    # Window-open threshold: the stratification-collapse spike at ASHP startup
+    # typically exceeds 2 °C/step.  ashp_on is NOT required to open a window
+    # since the collapse often precedes ASHP power draw by one 5-min step.
+    mid_rising_c: float = 2.0      # °C per interval — window-open threshold
+    setpoint_c: float = 55.0       # °C — close window when all upper nodes reach this
 
     # --- draw detection -----------------------------------------------------
-    draw_delta_c: float = -1.0      # °C per interval (bottom node)
+    draw_delta_c: float = -0.25      # °C per interval (bottom node)
 
     # --- windowing ----------------------------------------------------------
-    min_ashp_intervals: int = 1     # minimum consecutive ASHP-only intervals
+    min_ashp_intervals: int = 4     # minimum consecutive ASHP-only intervals (4 × 5 min = 20 min)
 
     # --- map fitting --------------------------------------------------------
     apply_high_load_filter: bool = False
