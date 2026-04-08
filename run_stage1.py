@@ -90,8 +90,8 @@ def _load_priors(
         adata = json.load(f)
     ashp_params = ASHPParams(
         c=np.array(adata["ashp"]["c"], dtype=float) if "c" in adata["ashp"] else None,
-        a=np.array(adata["ashp"]["a"], dtype=float),
-        b=np.array(adata["ashp"]["b"], dtype=float),
+        a=np.array(adata["ashp"]["a"], dtype=float) if "a" in adata["ashp"] else ASHPParams().a,
+        b=np.array(adata["ashp"]["b"], dtype=float) if "b" in adata["ashp"] else ASHPParams().b,
     )
 
     return tank_params, ashp_params

@@ -310,7 +310,6 @@ def _fit(
     dt_s = cfg.sampling_minutes * 60.0
 
     # Draw mask: flag steps k where T_bottom drops sharply at k+1.
-    # dT_bottom[k] = T_meas[k+1, 0] - T_meas[k, 0]; exclude if < draw_delta_c.
     dT_bottom = np.diff(T_meas[:, 0])          # shape (steps,)
     draw_mask = dT_bottom < cfg.draw_delta_c
     n_draw = int(draw_mask.sum())
@@ -324,7 +323,6 @@ def _fit(
     # that the lumped model cannot represent; including them would bias UA_adj
     # upward to partially explain the apparent mid-node heating.
     dT_mid = np.diff(T_meas[:, 1])             # shape (steps,)
-    # Q_ashp[k] is the heat attributed to step k→k+1 (same indexing as errs[k]).
     ashp_idle = Q_ashp[:steps] < cfg.ashp_off_kwh
     collapse_mask = (dT_mid > cfg.collapse_mid_rising_c) & ashp_idle
     n_collapse = int(collapse_mask.sum())
@@ -443,6 +441,7 @@ def run_global_fit(cfg: Optional[GlobalFitConfig] = None) -> GlobalFitResult:
     result = _fit(inputs, ua_loss, cfg, ua_adj_prior=ua_adj, f_ashp_prior=f_ashp)
     logger.info("Fitted UA_adj: %s", result.tank_params.UA_adj.tolist())
     logger.info("Final UA_loss: %s", result.tank_params.UA_loss.tolist())
+    logger.info("Fixed f_ashp (from ashp_fit.json): %s", result.tank_params.f_ashp.tolist())
     logger.info("Train RMSE: %s", result.train_rmse)
 
     return result
