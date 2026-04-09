@@ -45,7 +45,7 @@ def node_rmses(T_meas: np.ndarray, T_sim: np.ndarray) -> dict[str, float]:
 def cop_errors(
     df: pd.DataFrame,
     ashp_p: ashp_model.ASHPParams,
-    dt_h: float = 0.5,
+    dt_h: float = 5 / 60,
     Q_back: pd.Series = None
 ) -> dict[str, float]:
     """
@@ -102,7 +102,7 @@ def cop_errors(
 def ashp_performance_kpis(
     df: pd.DataFrame,
     ashp_p: ashp_model.ASHPParams,
-    dt_h: float = 0.5,
+    dt_h: float = 5 / 60,
 ) -> dict[str, float]:
     """Compute ASHP performance KPIs over the evaluation period.
 
@@ -156,6 +156,69 @@ def ashp_performance_kpis(
     }
 
 
+def compute_ashp_kpis(
+    df: pd.DataFrame,
+    ashp_p: ashp_model.ASHPParams,
+    dt_h: float = 5 / 60,
+) -> dict:
+    """Compute ASHP seasonal performance metrics.
+
+    Uses the COP map to estimate heat delivered, but only over intervals
+    where the ASHP was running (``ashp_inst_kwh > 0.05``).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Cleaned DataFrame with ASHP, tank, and temperature columns.
+    ashp_p : ashp_model.ASHPParams
+        Fitted ASHP parameters.
+    dt_h : float
+        Interval length in hours (default 0.5).
+
+    Returns
+    -------
+    dict
+        Keys:
+
+        - ``spf`` — seasonal performance factor = ΣQ_ashp / ΣP_elec
+        - ``mean_cop_on`` — mean predicted COP over on-intervals
+        - ``frac_cop_above_3`` — fraction of on-intervals with COP > 3
+        - ``ashp_runtime_frac`` — fraction of all intervals where ASHP was on
+        - ``n_samples`` — number of on-intervals used
+    """
+    ashp_on = df["ashp_inst_kwh"].fillna(0) > 0.05
+    n_on    = int(ashp_on.sum())
+    ashp_runtime_frac = float(n_on) / len(df) if len(df) > 0 else 0.0
+
+    nan_result = {
+        "spf": float("nan"),
+        "mean_cop_on": float("nan"),
+        "frac_cop_above_3": float("nan"),
+        "ashp_runtime_frac": ashp_runtime_frac,
+        "n_samples": n_on,
+    }
+
+    if n_on < 10:
+        return nan_result
+
+    sub     = df.loc[ashp_on]
+    T_sink  = ashp_model.sink_proxy(sub["tank_mid_c"].values, sub["tank_top_c"].values)
+    cop     = np.clip(
+        ashp_model.predict_cop(sub["t_out_c"].values, T_sink, ashp_p), 0.5, 8.0
+    )
+
+    P_meas = sub["ashp_inst_kwh"].values
+    Q_pred = P_meas * cop
+
+    return {
+        "spf":              float(np.nansum(Q_pred) / np.nansum(P_meas)),
+        "mean_cop_on":      float(np.nanmean(cop)),
+        "frac_cop_above_3": float(np.nanmean(cop >= 3.0)),
+        "ashp_runtime_frac": ashp_runtime_frac,
+        "n_samples":        n_on,
+    }
+
+
 def node_ordering_rate(T_sim: np.ndarray) -> float:
     """Fraction of steps where T_top >= T_mh >= T_mid >= T_bot (with 0.5 K tolerance)."""
     tol = 0.5
@@ -174,6 +237,7 @@ def energy_balance_residual(
     Q_imm: np.ndarray,
     T_amb: np.ndarray,
     params: tank_model.TankParams,
+    dt_s: float = 300.0,
 ) -> float:
     """Return total energy-balance residual [kWh] over the period.
 
@@ -181,19 +245,15 @@ def energy_balance_residual(
     """
     # Stored energy change
     dT = T_meas[-1] - T_meas[0]  # shape (4,)
-    E_stored = np.sum(dT) * tank_model.NODE_CAP / 3600.0  # kJ→kWh
+    E_stored = np.sum(dT * tank_model.NODE_CAP) / 3600.0  # kJ→kWh
 
     E_in = np.nansum(Q_st) + np.nansum(Q_ashp) + np.nansum(Q_imm)
 
     # Approximate total losses
-    dt_s = 1800.0
     E_loss = 0.0
     for i in range(4):
         avg_dT = np.nanmean(T_meas[:, i] - T_amb)
         E_loss += params.UA_loss[i] * avg_dT * dt_s * len(T_amb) / 3600.0
-        # include draw losses
-        avg_dT_draw = np.nanmean(T_meas[:, i] - params.T_mains)
-        E_loss += params.draw_ua[i] * avg_dT_draw * dt_s * len(T_amb) / 3600.0
 
     residual = E_in - E_stored - E_loss
     return float(residual)
@@ -206,6 +266,7 @@ def _one_step_ahead(
     Q_imm: np.ndarray,
     T_amb: np.ndarray,
     params: tank_model.TankParams,
+    dt_s: float = 300.0,
 ) -> np.ndarray:
     """One-step-ahead prediction: each step resets to the measured state.
 
@@ -218,7 +279,7 @@ def _one_step_ahead(
             T_meas[k],
             float(Q_st[k]), float(Q_ashp[k]),
             float(Q_imm[k]), float(T_amb[k]),
-            params,
+            params, dt_s=dt_s,
         )
     return T_pred
 
@@ -230,6 +291,7 @@ def evaluate(
     label: str = "validation",
     plot_dir: Path | None = None,
     Q_back: pd.Series = None,
+    dt_s: float = 300.0,
 ) -> dict:
     """
     Run the full evaluation on a DataFrame slice.
@@ -239,7 +301,7 @@ def evaluate(
     If Q_back is not provided, it is computed using back_calculate_ashp_heat.
     Returns a summary dict and optionally saves plots.
     """
-    inputs = identification.prepare_inputs(df, id_result.ashp_params)
+    inputs = identification.prepare_inputs(df, id_result.ashp_params, dt_h=dt_s / 3600.0)
     T_meas = inputs["T_meas"]
 
     # One-step-ahead prediction
@@ -250,18 +312,20 @@ def evaluate(
         inputs["Q_imm"],
         inputs["T_amb"],
         id_result.tank_params,
+        dt_s=dt_s,
     )
 
     if Q_back is None:
-        Q_back = identification.back_calculate_ashp_heat(df)
+        Q_back = identification.back_calculate_ashp_heat(df, dt_s=dt_s)
 
-    rmses = node_rmses(T_meas[1:], T_sim)
-    cop_err = cop_errors(df, id_result.ashp_params, Q_back=Q_back)
-    ashp_kpis = ashp_performance_kpis(df, id_result.ashp_params)
+    rmses    = node_rmses(T_meas[1:], T_sim)
+    cop_err  = cop_errors(df, id_result.ashp_params, dt_h=dt_s / 3600.0, Q_back=Q_back)
+    ashp_kpis = compute_ashp_kpis(df, id_result.ashp_params, dt_h=dt_s / 3600.0)
     ordering = node_ordering_rate(T_sim)
     e_resid = energy_balance_residual(
         T_meas, inputs["Q_st"], inputs["Q_ashp"],
         inputs["Q_imm"], inputs["T_amb"], id_result.tank_params,
+        dt_s=dt_s,
     )
 
     summary = {
@@ -311,3 +375,22 @@ def _plot_nodes(
     fig.savefig(plot_dir / f"nodes_{label}.png", dpi=150)
     plt.close(fig)
     logger.info("Saved node plot to %s", plot_dir / f"nodes_{label}.png")
+
+    # Save plotting data to CSV
+    df_plot = pd.DataFrame(
+        index=time_idx,
+        data={
+            f"{name}_measured": T_meas[:, i] for i, name in enumerate(NODE_NAMES)
+        } | {
+            f"{name}_simulated": T_sim[:, i] for i, name in enumerate(NODE_NAMES)
+        }
+    )
+    df_plot.index.name = "time"
+    if label.lower() == "train":
+        csv_name = "nodes_train.csv"
+    elif label.lower() == "validation":
+        csv_name = "nodes_validation.csv"
+    else:
+        csv_name = f"nodes_{label}.csv"
+    df_plot.to_csv(plot_dir / csv_name)
+    logger.info("Saved node plot data to %s", plot_dir / csv_name)

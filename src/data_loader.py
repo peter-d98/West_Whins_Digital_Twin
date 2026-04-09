@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 TEMP_MIN = -10.0
 TEMP_MAX = 99.0
 
+# Conservative physical bounds for interval-energy clipping.
+# These remove obvious timestamp/reset artefacts after cumulative differencing.
+ASHP_POWER_MAX_KW = 20.0
+IMM_POWER_MAX_KW = 150.0
+
 # ---------------------------------------------------------------------------
 # Public helpers
 # ---------------------------------------------------------------------------
@@ -65,11 +70,42 @@ def load_and_clean(
     Parses datetime objects with DD/MM/YYYY format and sets the time column as the index, sorted in chronological order. """
     time_col = cfg["time"]["name"]
     time_fmt = cfg["time"]["format"] 
-    df[time_col] = pd.to_datetime(df[time_col], format=time_fmt, dayfirst=True)
+
+    try:
+        df[time_col] = pd.to_datetime(df[time_col], format=time_fmt, dayfirst=True)
+    except ValueError:
+        logger.warning(
+        "Time format '%s' failed, retrying with format='mixed'. "
+        "This is expected for 1-minute CSVs with inconsistent HH:MM vs HH:MM:SS.",
+        time_fmt,
+    )
+        df[time_col] = pd.to_datetime(df[time_col], format="mixed", dayfirst=True)
+        
     df = df.set_index(time_col).sort_index()
     df.index.name = "time"
+    
+    # Drop duplicate timestamps (DST rollback or mixed format artefacts)
+    n_before = len(df)
+    df = df[~df.index.duplicated(keep="first")]
+    n_dupes = n_before - len(df)
+    if n_dupes > 0:
+        logger.warning(
+        "Dropped %d duplicate timestamps (likely DST rollback or mixed "
+        "HH:MM/HH:MM:SS format artefacts).",
+        n_dupes,
+    )
 
     # Align to expected grid
+    # Drop duplicate timestamps before calling asfreq — duplicates occur in
+    # 1-minute (and 30-minute) UK data at DST transitions when clocks go back
+    # and naive timestamps repeat (e.g. 01:00–01:59 appears twice in October).
+    n_dup = df.index.duplicated().sum()
+    if n_dup:
+        logger.warning(
+            "Dropping %d duplicate timestamps (likely DST clock-back artefacts).",
+            n_dup,
+        )
+        df = df[~df.index.duplicated(keep="first")]
     freq = f"{sampling_minutes}min"
     df = df.asfreq(freq)
 
@@ -96,7 +132,8 @@ def load_and_clean(
             df.loc[neg_pv, "pv_inst_kw"] = 0.0
 
     # ---- 7. Temperature sanity clipping -----------------------------------
-    temp_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c", "t_amb_c"]
+    temp_cols = ["tank_bottom_c", "tank_mid_c", "tank_mid_hi_c", "tank_top_c",
+                 "t_amb_c", "t_out_c"]
     for tc in temp_cols:
         if tc in df.columns:
             bad = (df[tc] < TEMP_MIN) | (df[tc] > TEMP_MAX) #creates boolean mask for implausible temperature values
@@ -112,19 +149,76 @@ def load_and_clean(
                 logger.info("Clipping %d negative values in %s.", neg.sum(), ec)
                 df.loc[neg, ec] = 0.0
 
+    # Physical upper bounds for interval energies (kWh per interval)
+    if "ashp_inst_kwh" in df.columns:
+        ashp_kwh_max = ASHP_POWER_MAX_KW * sampling_minutes / 60.0
+        too_high = df["ashp_inst_kwh"] > ashp_kwh_max
+        if too_high.any():
+            logger.warning(
+                "Clipping %d implausible ASHP interval-energy values (> %.3f kWh/%dmin).",
+                too_high.sum(),
+                ashp_kwh_max,
+                sampling_minutes,
+            )
+            df.loc[too_high, "ashp_inst_kwh"] = 0.0
+
+    if "imm_tot_inst_kwh" in df.columns:
+        imm_kwh_max = IMM_POWER_MAX_KW * sampling_minutes / 60.0
+        too_high = df["imm_tot_inst_kwh"] > imm_kwh_max
+        if too_high.any():
+            logger.warning(
+                "Clipping %d implausible immersion interval-energy values (> %.3f kWh/%dmin).",
+                too_high.sum(),
+                imm_kwh_max,
+                sampling_minutes,
+            )
+            df.loc[too_high, "imm_tot_inst_kwh"] = 0.0
+
     # ---- 9. Forward-fill tiny gaps (≤2 steps) then leave NaN --------------
     df = df.ffill(limit=2)
 
     # ---- 10. Derive outdoor air temperature from plant-room proxy ----------
     # t_out_c is estimated outdoor air temperature; the plant-room proxy
     # (t_amb_c) runs approximately 10 °C above outdoor air temperature.
+    # We recover t_out_c from the CSV column, then recompute t_amb_c using a
+    # corrected offset of 3 °C (the tank sits in an unheated outdoor shed).
     if "t_amb_c" in df.columns:
         df["t_out_c"] = df["t_amb_c"] - 10.0
+        df["t_amb_c"] = df["t_out_c"] + 3.0
 
     logger.info("Cleaned DataFrame shape: %s, date range %s → %s",
                 df.shape, df.index.min(), df.index.max())
     return df
 
+
+def load_5min(
+    csv_path: str | Path | None = None,
+    yaml_path: str | Path | None = None,
+) -> pd.DataFrame:
+    """Load the pre-built 5-minute CSV via :func:`load_and_clean`.
+
+    This is a convenience wrapper that defaults to
+    ``data/FullDS_Findhorn_5min.csv`` and ``column_mapping_5min.yaml``.
+
+    Parameters
+    ----------
+    csv_path : path to the 5-minute CSV (default: ``data/FullDS_Findhorn_5min.csv``).
+    yaml_path : path to column mapping YAML (default: ``column_mapping_5min.yaml``).
+
+    Returns
+    -------
+    pd.DataFrame with a ``DatetimeIndex`` named ``time`` at 5-minute cadence.
+    """
+    root = Path(__file__).resolve().parent.parent
+    if csv_path is None:
+        csv_path = root / "data" / "FullDS_Findhorn_5min.csv"
+    if yaml_path is None:
+        yaml_path = root / "column_mapping_5min.yaml"
+
+    cfg = load_column_mapping(yaml_path)
+    sampling_minutes = cfg.get("assumptions", {}).get("sampling_minutes", 5)
+
+    return load_and_clean(csv_path, yaml_path, sampling_minutes=sampling_minutes)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -134,6 +228,7 @@ def load_and_clean(
 #leading _ indicates these are internal constants not to be accessed from outside this module
 _YAML_PATHS: list[tuple[str, list[str]]] = [
     ("t_amb_c",           ["ambient", "ambient_c"]),
+    ("t_out_c",           ["outdoor_temp", "out_c"]),
     ("tank_bottom_c",     ["tank", "bottom_c"]),
     ("tank_mid_c",        ["tank", "mid_c"]),
     ("tank_mid_hi_c",     ["tank", "mid_hi_c"]),
@@ -149,6 +244,7 @@ _YAML_PATHS: list[tuple[str, list[str]]] = [
     ("imm_tot_cum_kwh",   ["immersion", "total_cum_kwh"]),
     ("imm_tot_inst_kwh",  ["immersion", "total_int_kwh"]),
     ("backup_imm_kwh",    ["immersion", "backup_int_kwh"]),
+    ("backup_imm_cum_kwh",["immersion", "backup_cum_kwh"]),
     ("pv_inst_kw",        ["pv_proxy", "inst_kw"]),
 ]
 

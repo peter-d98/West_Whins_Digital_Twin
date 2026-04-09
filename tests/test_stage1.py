@@ -151,6 +151,8 @@ class TestASHPModel:
         P_kwh = P_true * 0.5 + rng.normal(0, 0.05, n)
         params = fit_ashp_maps(T_amb, T_sink, None, P_kwh)
         assert params.b is not None
+        assert params.c is not None
+        assert len(params.c) == 4
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +208,7 @@ class TestTankModel:
         p2 = TankParams.from_vector(v)
         np.testing.assert_array_equal(p.UA_loss, p2.UA_loss)
         np.testing.assert_array_equal(p.UA_adj, p2.UA_adj)
-        assert p.mix_coeff == p2.mix_coeff
+        np.testing.assert_array_equal(p.f_st, p2.f_st)
 
 
 # ---------------------------------------------------------------------------
