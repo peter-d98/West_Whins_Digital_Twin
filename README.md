@@ -20,6 +20,13 @@ Provide a single **30‑minute** time‑series CSV with columns (or mappable equ
 
 These headers and cadence are consistent with the working dataset. Use `column_mapping.yaml` to map if they differ. 
 
+## Data
+Place the following files in the data/ directory before running:
+- FullDS_Findhorn.csv (30-minute dataset)
+- Data_WestWhins_2023_2024_1min.csv (1-minute energy data, 2023-2024)
+- Data_WestWhins_2025_final_1min.csv (1-minute energy data, 2025)
+- Data_WestWhins_TankT__with_T_out_1min.csv (1-minute tank temperatures + T_out)
+
 ## Known quirks to handle
 
 - **Small negative `PV Inst [kW]`** values can occur at night; treat as expected artefacts.   
