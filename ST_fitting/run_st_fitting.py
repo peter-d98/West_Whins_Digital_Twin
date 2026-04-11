@@ -20,7 +20,7 @@ Usage
     python ST_fitting/run_st_fitting.py \\
         --csv data/FullDS_Findhorn_5min.csv \\
         --yaml column_mapping_5min.yaml \\
-        --st-on 0.005 --draw-delta -0.5
+        --flow-dt 4.0 --flow-min-l 0.04 --power-min 0.1
 
 All output is written under ST_fitting/output/ and ST_fitting/diagnostics/.
 """
@@ -74,14 +74,16 @@ def _parse_args() -> argparse.Namespace:
                         "(default: Global_fitting/output/global_fit.json).")
 
     # Threshold overrides
-    p.add_argument("--st-on", type=float, default=None,
-                   help="ST-on threshold [kWh] (default 0.001).")
+    p.add_argument("--flow-dt", type=float, default=None,
+                   help="G1: min ST flow T minus tank bottom T [°C] (default 4.0).")
+    p.add_argument("--flow-min-l", type=float, default=None,
+                   help="G2: min ST flow volume per interval [L] (default 0.04).")
+    p.add_argument("--power-min", type=float, default=None,
+                   help="G3: min ST power [kW] (default 0.1).")
     p.add_argument("--ashp-off", type=float, default=None,
-                   help="ASHP-off threshold [kWh] (default 0.016).")
+                   help="G5: ASHP-off threshold [kWh/interval] (default 0.016).")
     p.add_argument("--imm-off", type=float, default=None,
-                   help="Immersion-off threshold [kWh] (default 0.001).")
-    p.add_argument("--draw-delta", type=float, default=None,
-                   help="Draw delta threshold [°C] (default -0.25).")
+                   help="G6: immersion-off threshold [kWh/interval] (default 0.001).")
     p.add_argument("--min-intervals", type=int, default=None,
                    help="Minimum ST-only intervals per window (default 4).")
     p.add_argument("--train-frac", type=float, default=None,
@@ -99,14 +101,16 @@ def _parse_args() -> argparse.Namespace:
 def _build_config(args: argparse.Namespace) -> STFitConfig:
     """Build an STFitConfig, applying any CLI overrides."""
     cfg = STFitConfig()
-    if args.st_on is not None:
-        cfg.st_on_kwh = args.st_on
+    if args.flow_dt is not None:
+        cfg.st_flow_dt_min_c = args.flow_dt
+    if args.flow_min_l is not None:
+        cfg.st_flow_min_l = args.flow_min_l
+    if args.power_min is not None:
+        cfg.st_power_min_kw = args.power_min
     if args.ashp_off is not None:
         cfg.ashp_off_kwh = args.ashp_off
     if args.imm_off is not None:
         cfg.imm_off_kwh = args.imm_off
-    if args.draw_delta is not None:
-        cfg.draw_delta_c = args.draw_delta
     if args.min_intervals is not None:
         cfg.min_st_intervals = args.min_intervals
     if args.train_frac is not None:

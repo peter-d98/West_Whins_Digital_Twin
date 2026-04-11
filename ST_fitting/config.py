@@ -23,16 +23,17 @@ class STFitConfig:
         Interval cadence of the input data [minutes].
     train_frac : float
         Fraction of the time-ordered dataset to use for fitting (0–1).
-    st_on_kwh : float
-        Solar-thermal is considered ON when ``st_kwh > st_on_kwh`` [kWh].
+    st_flow_dt_min_c : float
+        ST flow temperature must exceed tank bottom temperature by at least
+        this value [°C] for an interval to be accepted.  Gate 1.
+    st_flow_min_l : float
+        Minimum ST flow volume per interval [L].  Gate 2.
+    st_power_min_kw : float
+        Minimum ST power per interval [kW].  Gate 3.
     ashp_off_kwh : float
-        ASHP is OFF when ``ashp_inst_kwh <= ashp_off_kwh`` [kWh].
+        ASHP is OFF when ``ashp_inst_kwh <= ashp_off_kwh`` [kWh].  Gate 5.
     imm_off_kwh : float
-        Immersion is OFF when ``imm_tot_inst_kwh <= imm_off_kwh`` [kWh].
-    draw_delta_c : float
-        Maximum allowed drop in ``tank_bottom_c`` between consecutive samples
-        to NOT flag a draw event [°C].  Default −0.25 (a drop > 0.25 °C is a
-        draw).
+        Immersion is OFF when ``imm_tot_inst_kwh <= imm_off_kwh`` [kWh].  Gate 6.
     min_st_intervals : int
         Minimum number of consecutive ST-only intervals to form a window.
         Default 4 (4 × 5 min = 20 min).
@@ -53,12 +54,12 @@ class STFitConfig:
     train_frac: float = 0.7
 
     # --- ST-only interval detection thresholds ------------------------------
-    st_on_kwh: float = 0.01       # kWh per interval — above = ST on
-    ashp_off_kwh: float = 0.016    # kWh per interval — below = ASHP off
-    imm_off_kwh: float = 0.001     # kWh per interval — below = immersion off
-
-    # --- draw detection -----------------------------------------------------
-    draw_delta_c: float = -0.1    # °C per interval (bottom node)
+    st_flow_dt_min_c: float = 4.0   # Gate 1: ST flow T − bottom T > this [°C]
+    st_flow_min_l: float = 0.04     # Gate 2: ST flow volume > this [L/interval]
+    st_power_min_kw: float = 0.1    # Gate 3: ST power > this [kW]
+    # Gate 4 (bottom rising) has no threshold — requires bottom.diff() > 0
+    ashp_off_kwh: float = 0.016     # Gate 5: ASHP energy ≤ this [kWh/interval]
+    imm_off_kwh: float = 0.001      # Gate 6: immersion energy ≤ this [kWh/interval]
 
     # --- windowing ----------------------------------------------------------
     min_st_intervals: int = 4      # minimum consecutive ST-only intervals
@@ -72,3 +73,6 @@ class STFitConfig:
     ])
     t_amb_col: str = "t_amb_c"
     t_out_col: str = "t_out_c"
+    st_flow_temp_col: str = "st_flow_temp_c"   # ST flow temperature
+    st_flow_col: str = "st_flow_l"             # ST flow volume [L/interval]
+    st_power_col: str = "st_power_kw"          # ST power [kW]

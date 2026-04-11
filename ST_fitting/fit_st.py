@@ -75,7 +75,7 @@ def fit_f_st(
     Parameters
     ----------
     df : pd.DataFrame
-        Full cleaned DataFrame (must include ``st_kwh`` column).
+        Full cleaned DataFrame (must include ``st_power_kw`` column).
     windows : list[STWindow]
         Accepted ST-only windows from the detector.
     cfg : STFitConfig, optional
@@ -95,7 +95,8 @@ def fit_f_st(
     df_train = df.iloc[:n_train]
 
     T_train_vals = df_train[cfg.node_cols].values   # (N_train, 4)
-    Q_st_vals = df_train["st_kwh"].fillna(0.0).values
+    dt_h = cfg.sampling_minutes / 60.0
+    Q_st_vals = (df_train[cfg.st_power_col].fillna(0.0) * dt_h).values  # kWh/interval
 
     if not windows:
         logger.error("No ST-only windows available for f_st estimation.")
@@ -146,7 +147,8 @@ def fit_f_st(
             "end": w.end,
             "n_intervals": w.n_intervals,
             "Q_st_meas_kwh": round(q_st_window_kwh, 6),
-            "dE_stored_kJ": round(float(total_energy), 2),
+            "dE_stored_kWh": round(float(total_energy/3600), 2),
+            "Q_meas:Q_stored_ratio": round(float(q_st_window_kwh / (total_energy/3600)), 4) if total_energy > 1e-3 else None,
             "dT_bottom": round(float(dT[0]), 4),
             "dT_mid": round(float(dT[1]), 4),
             "dT_mid_hi": round(float(dT[2]), 4),
@@ -211,10 +213,11 @@ def fit_f_st(
                 "n_windows": n_valid,
             },
             "thresholds": {
-                "st_on_kwh": cfg.st_on_kwh,
+                "st_flow_dt_min_c": cfg.st_flow_dt_min_c,
+                "st_flow_min_l": cfg.st_flow_min_l,
+                "st_power_min_kw": cfg.st_power_min_kw,
                 "ashp_off_kwh": cfg.ashp_off_kwh,
                 "imm_off_kwh": cfg.imm_off_kwh,
-                "draw_delta_c": cfg.draw_delta_c,
                 "min_st_intervals": cfg.min_st_intervals,
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
