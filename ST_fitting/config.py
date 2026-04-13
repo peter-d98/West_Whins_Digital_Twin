@@ -64,6 +64,10 @@ class STFitConfig:
     # --- windowing ----------------------------------------------------------
     min_st_intervals: int = 4      # minimum consecutive ST-only intervals
 
+    # --- solar activation gates (used by st_model.solar_active) --------------
+    gti_min_wm2: float = 180.0        # minimum GTI for ST active [W/m²]
+    t_bottom_max_c: float = 55.0      # bottom-node saturation ceiling [°C]
+
     # --- plotting / diagnostics ---------------------------------------------
     n_plot_windows: int = 1
 

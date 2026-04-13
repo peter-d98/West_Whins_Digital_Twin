@@ -17,8 +17,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
+
+from ST_fitting.st_model import (
+    predict_q_sol_kwh,
+    predict_t_flow_c,
+    solar_active,
+    st_node_weights_from_tflow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +101,37 @@ class TankParams:
         ], dtype=float)
 
 
+@dataclass
+class STModelParams:
+    """Parameters for the regression-based ST energy model.
+
+    Loaded from ``ST_fitting/output/st_fit.json``.
+    """
+    q0_kwh: float = 0.0
+    q1_kwh_per_wm2: float = 0.0
+    b0_c: float = 0.0
+    b1: float = 0.0
+    b2_c_per_wm2: float = 0.0
+    gti_min_wm2: float = 180.0
+    t_bottom_max_c: float = 55.0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "STModelParams":
+        """Construct from the nested dict in st_fit.json."""
+        q = d.get("Q_sol", {})
+        t = d.get("T_flow", {})
+        a = d.get("activation", {})
+        return cls(
+            q0_kwh=q.get("q0_kwh", 0.0),
+            q1_kwh_per_wm2=q.get("q1_kwh_per_wm2", 0.0),
+            b0_c=t.get("b0_c", 0.0),
+            b1=t.get("b1", 0.0),
+            b2_c_per_wm2=t.get("b2_c_per_wm2", 0.0),
+            gti_min_wm2=a.get("gti_min_wm2", 180.0),
+            t_bottom_max_c=a.get("t_bottom_max_c", 55.0),
+        )
+
+
 def tank_step(
     T: np.ndarray,
     Q_st_kwh: float,
@@ -101,6 +140,9 @@ def tank_step(
     T_amb: float,
     params: TankParams,
     dt_s: float = 1800.0,
+    *,
+    gti_wm2: Optional[float] = None,
+    st_params: Optional[STModelParams] = None,
 ) -> np.ndarray:
     """Advance the 4-node tank by one time step (Euler forward).
 
@@ -119,14 +161,32 @@ def tank_step(
     T = np.array(T, dtype=float)
     T_new = T.copy()
 
+    # --- ST heat: dynamic pathway (if GTI + st_params provided) or legacy ---
+    if gti_wm2 is not None and st_params is not None:
+        if solar_active(gti_wm2, T[0], st_params.gti_min_wm2, st_params.t_bottom_max_c):
+            Q_st_kwh_dyn = predict_q_sol_kwh(
+                gti_wm2, st_params.q0_kwh, st_params.q1_kwh_per_wm2,
+            )
+            t_flow = predict_t_flow_c(
+                T[0], gti_wm2, st_params.b0_c, st_params.b1, st_params.b2_c_per_wm2,
+            )
+            w_st = st_node_weights_from_tflow(T, t_flow)
+        else:
+            Q_st_kwh_dyn = 0.0
+            w_st = np.zeros(4)
+        Q_st_kj = Q_st_kwh_dyn * 3600.0
+        f_st_eff = w_st
+    else:
+        Q_st_kj = Q_st_kwh * 3600.0
+        f_st_eff = params.f_st
+
     # Convert kWh → kJ for the interval
-    Q_st_kj  = Q_st_kwh * 3600.0
     Q_ashp_kj = Q_ashp_kwh * 3600.0
     Q_imm_kj  = Q_imm_kwh * 3600.0
 
     for i in range(4):
-        # Heat input to this node [kJ] e.g. if f_st[3]=0.2, top node gets 20% of ST heat input
-        dQ = (params.f_st[i] * Q_st_kj
+        # Heat input to this node [kJ]
+        dQ = (f_st_eff[i] * Q_st_kj
               + params.f_ashp[i] * Q_ashp_kj
               + params.f_imm[i] * Q_imm_kj)
 
@@ -156,6 +216,9 @@ def simulate(
     T_amb: np.ndarray,
     params: TankParams,
     dt_s: float = 1800.0,
+    *,
+    gti: Optional[np.ndarray] = None,
+    st_params: Optional[STModelParams] = None,
 ) -> np.ndarray:
     """Run the tank model over N time steps.
 
@@ -177,6 +240,10 @@ def simulate(
 
     # Each step feeds the output of the previous step(T_hist[k]) as the input to the next (T_hist[k+1]).
     for k in range(N):
+        kw = {}
+        if gti is not None and st_params is not None:
+            kw["gti_wm2"] = float(gti[k])
+            kw["st_params"] = st_params
         T_hist[k + 1] = tank_step(
             T_hist[k],
             float(Q_st[k]),
@@ -185,5 +252,6 @@ def simulate(
             float(T_amb[k]),
             params,
             dt_s,
+            **kw,
         )
     return T_hist
