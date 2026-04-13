@@ -45,6 +45,11 @@ class STFitConfig:
         Column name for outdoor air temperature.
     n_plot_windows : int
         How many windows to select for diagnostic plotting.
+    gti_min_wm2 : float
+        GTI threshold below which the ST system is modelled as inactive [W/m²].
+    t_bottom_max_c : float
+        Bottom-node temperature above which the ST system is modelled as
+        inactive (saturation limit) [°C].
     """
 
     # --- data cadence -------------------------------------------------------
@@ -64,9 +69,9 @@ class STFitConfig:
     # --- windowing ----------------------------------------------------------
     min_st_intervals: int = 4      # minimum consecutive ST-only intervals
 
-    # --- solar activation gates (used by st_model.solar_active) --------------
-    gti_min_wm2: float = 180.0        # minimum GTI for ST active [W/m²]
-    t_bottom_max_c: float = 55.0      # bottom-node saturation ceiling [°C]
+    # --- ST model activation / saturation thresholds ------------------------
+    gti_min_wm2: float = 180.0     # Minimum GTI for ST activation [W/m²]
+    t_bottom_max_c: float = 55.0   # Bottom-node saturation temperature [°C]
 
     # --- plotting / diagnostics ---------------------------------------------
     n_plot_windows: int = 1
@@ -78,5 +83,6 @@ class STFitConfig:
     t_amb_col: str = "t_amb_c"
     t_out_col: str = "t_out_c"
     st_flow_temp_col: str = "st_flow_temp_c"   # ST flow temperature
+    st_return_temp_col: str = "st_return_temp_c"  # ST return temperature
     st_flow_col: str = "st_flow_l"             # ST flow volume [L/interval]
     st_power_col: str = "st_power_kw"          # ST power [kW]
