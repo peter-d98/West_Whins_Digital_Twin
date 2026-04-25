@@ -178,12 +178,14 @@ def load_and_clean(
     df = df.ffill(limit=2)
 
     # ---- 10. Derive outdoor air temperature from plant-room proxy ----------
-    # t_out_c is estimated outdoor air temperature; the plant-room proxy
-    # (t_amb_c) runs approximately 10 °C above outdoor air temperature.
-    # We recover t_out_c from the CSV column, then recompute t_amb_c using a
-    # corrected offset of 3 °C (the tank sits in an unheated outdoor shed).
+    # Two possible CSV layouts are supported:
+    # - legacy: a plant-room proxy column (t_amb_c) provided -> recover t_out_c
+    # - preferred: t_out_c provided directly -> derive t_amb_c = t_out_c + 3
+    # The +3 °C offset reflects the unheated outdoor shed offset used by the tank.
     if "t_amb_c" in df.columns:
         df["t_out_c"] = df["t_amb_c"] - 10.0
+        df["t_amb_c"] = df["t_out_c"] + 3.0
+    elif "t_out_c" in df.columns and "t_amb_c" not in df.columns:
         df["t_amb_c"] = df["t_out_c"] + 3.0
 
     logger.info("Cleaned DataFrame shape: %s, date range %s → %s",
@@ -229,6 +231,8 @@ def load_5min(
 _YAML_PATHS: list[tuple[str, list[str]]] = [
     ("t_amb_c",           ["ambient", "ambient_c"]),
     ("t_out_c",           ["outdoor_temp", "out_c"]),
+    # support YAMLs where outdoor temp is placed under `ambient.out_c`
+    ("t_out_c",           ["ambient", "out_c"]),
     ("tank_bottom_c",     ["tank", "bottom_c"]),
     ("tank_mid_c",        ["tank", "mid_c"]),
     ("tank_mid_hi_c",     ["tank", "mid_hi_c"]),

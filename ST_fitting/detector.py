@@ -1,36 +1,18 @@
 """
-ST_fitting.detector – Detect clean ST-only intervals in the dataset.
+ST_fitting.detector – Detect ST-only charging windows using bottom-node
+peak logic on 30-minute data.
 
-An interval is accepted when ALL four gates are true *and* the preceding
-interval was also accepted (2-step persistence).  The gates are:
+Window detection rules:
+  START:  bottom node rises > bottom_rise_start_c  AND
+          ST power > st_power_start_kw  AND
+          ASHP off  AND  immersion off.
+  CONTINUE:  bottom node still rising (dT > 0).
+  END:    bottom node stopped rising for ``bottom_flat_close``
+          consecutive intervals.
 
-  G1  ST flow temp − tank bottom temp > st_flow_dt_min_c  [°C]
-  G2  ST flow volume > st_flow_min_l                       [L/interval]
-  G3  ST power > st_power_min_kw                           [kW]
-  G4  tank bottom temp[k] > tank bottom temp[k−1]          (bottom rising)
-  G5  ASHP energy <= ashp_off_kwh                          [kWh/interval]
-  G6  immersion energy <= imm_off_kwh                      [kWh/interval]
-
-Opening persistence rule (2 consecutive valid to open):
-  valid[k]  = G1[k] & G2[k] & G3[k] & G4[k] & G5[k] & G6[k]
-  valid[k]  = valid[k] & valid[k−1]
-
-Closing persistence rule (2 consecutive invalid to close):
-  A window that is open stays open through a single invalid interval;
-  it closes only when two consecutive intervals both fail the gates.
-
-This rejects curtailed ST episodes where the pump runs and power/flow
-registers but no heat enters the store (e.g. buffer bypass, anti-steam
-curtailment): those events pass G2 and G3 but fail G1 and/or G4 because
-the temperature differential is absent.
-
-NaN values in either the ST flow temp or tank bottom propagate as False
-through G1, so curtailed intervals are excluded without any special NaN
-branch.  An explicit NaN guard is still applied to the node and ambient
-columns so that fitting residuals are never computed on incomplete data.
-
-Contiguous accepted intervals are grouped into windows.  Windows shorter
-than ``min_st_intervals`` are rejected.
+The window is trimmed so that only intervals where the bottom node is
+still rising are included (degradation tail excluded).  Back-calculated
+energy is computed from all 4 node temperatures across the trimmed window.
 """
 
 from __future__ import annotations
@@ -53,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class STWindow:
-    """A contiguous block of clean ST-only intervals.
+    """A contiguous block of ST-only charging intervals.
 
     Attributes
     ----------
@@ -62,18 +44,17 @@ class STWindow:
     start : pd.Timestamp
         Timestamp of the first interval in the window.
     end : pd.Timestamp
-        Timestamp of the last interval in the window.
+        Timestamp of the last interval in the window (trimmed to peak).
     n_intervals : int
         Number of intervals in the window.
     indices : np.ndarray
-        Integer positional indices into the training DataFrame for each
-        interval in this window.
+        Integer positional indices into the training DataFrame.
     """
     window_id: int
     start: pd.Timestamp
     end: pd.Timestamp
     n_intervals: int
-    indices: np.ndarray   # positional iloc indices into df_train
+    indices: np.ndarray
 
 
 # ---------------------------------------------------------------------------
@@ -84,14 +65,13 @@ def detect_st_windows(
     df: pd.DataFrame,
     cfg: Optional[STFitConfig] = None,
 ) -> tuple[List[STWindow], pd.DataFrame]:
-    """Detect ST-only windows in the training portion of *df*.
+    """Detect ST-only charging windows in the training portion of *df*.
 
     Parameters
     ----------
     df : pd.DataFrame
         Cleaned DataFrame (output of ``src.data_loader.load_and_clean``).
-        Must contain columns for the 4 node temperatures, ambient temp,
-        outdoor temp, ``st_flow_temp_c``, ``st_flow_l``, ``st_power_kw``,
+        Must contain columns for the 4 node temperatures, ``st_power_kw``,
         ``ashp_inst_kwh``, and ``imm_tot_inst_kwh``.
     cfg : STFitConfig, optional
         Configuration object.  Defaults to ``STFitConfig()`` if not provided.
@@ -99,183 +79,121 @@ def detect_st_windows(
     Returns
     -------
     windows : list[STWindow]
-        Validated ST-only windows ready for f_st calculation.
+        Validated ST-only windows trimmed to the bottom-node peak.
     diagnostics_df : pd.DataFrame
-        One row per interval in the training set with boolean mask columns
-        and a ``reject_reason`` column (empty string for accepted intervals).
+        One row per training interval with gate columns and window membership.
     """
     if cfg is None:
         cfg = STFitConfig()
 
-    # -- Step 1: Extract training portion ------------------------------------
+    # -- 1. Training slice ---------------------------------------------------
     n_train = int(len(df) * cfg.train_frac)
     df_train = df.iloc[:n_train].copy()
     logger.info(
-        "Training slice: %s → %s  (%d intervals)",
-        df_train.index.min(), df_train.index.max(), len(df_train),
+        "Training slice: %s → %s  (%d intervals, %d-min cadence)",
+        df_train.index.min(), df_train.index.max(),
+        len(df_train), cfg.sampling_minutes,
     )
 
-    # -- Step 2: NaN guard for columns needed by the fitting model -----------
-    required_cols = cfg.node_cols + [cfg.t_amb_col, cfg.t_out_col]
-    has_nan = df_train[required_cols].isna().any(axis=1)
+    # -- 2. Bottom-node dT ---------------------------------------------------
+    bottom = df_train[cfg.node_cols[0]].values
+    dT_bottom = np.diff(bottom, prepend=np.nan)
+    bottom_rising = dT_bottom > 0.0
 
-    # Also need finite temperatures at the *previous* row for dT calculation
-    T = df_train[cfg.node_cols].values
-    finite_now = np.all(np.isfinite(T), axis=1)
-    finite_prev = np.roll(finite_now, 1)
-    finite_prev[0] = False
-    has_finite_pair = pd.Series(finite_now & finite_prev, index=df_train.index)
+    # -- 3. Gate signals -----------------------------------------------------
+    g_power = df_train[cfg.st_power_col].fillna(0.0).values > cfg.st_power_start_kw
+    g_rise = dT_bottom > cfg.bottom_rise_start_c
+    g_ashp = df_train["ashp_inst_kwh"].fillna(0.0).values <= cfg.ashp_off_kwh
+    g_imm = df_train["imm_tot_inst_kwh"].fillna(0.0).values <= cfg.imm_off_kwh
 
-    # -- Step 3: Four detection gates ----------------------------------------
-    # G1: ST flow temperature minus tank bottom > threshold
-    #     NaN in either column → difference is NaN → gate is False (fillna)
-    dT_flow = (
-        df_train[cfg.st_flow_temp_col] - df_train[cfg.node_cols[0]]
-    )
-    g1 = (dT_flow > cfg.st_flow_dt_min_c).fillna(False)
-
-    # G2: ST flow volume above minimum
-    g2 = (df_train[cfg.st_flow_col].fillna(0.0) > cfg.st_flow_min_l)
-
-    # G3: ST power above minimum
-    g3 = (df_train[cfg.st_power_col].fillna(0.0) > cfg.st_power_min_kw)
-
-    # G4: tank bottom temperature rising (first row is always False)
-    g4 = (df_train[cfg.node_cols[0]].diff() > 0).fillna(False)
-
-    # G5: ASHP off
-    g5 = (df_train["ashp_inst_kwh"].fillna(0.0) <= cfg.ashp_off_kwh)
-
-    # G6: immersion off
-    g6 = (df_train["imm_tot_inst_kwh"].fillna(0.0) <= cfg.imm_off_kwh)
+    can_open = g_power & g_rise & g_ashp & g_imm
 
     logger.info(
-        "Gate pass rates — G1: %d  G2: %d  G3: %d  G4: %d  G5: %d  G6: %d  (of %d intervals)",
-        g1.sum(), g2.sum(), g3.sum(), g4.sum(), g5.sum(), g6.sum(), len(df_train),
+        "Gate pass rates — power: %d  rise>%.0f°C: %d  ashp_off: %d  "
+        "imm_off: %d  can_open: %d  (of %d)",
+        g_power.sum(), cfg.bottom_rise_start_c, g_rise.sum(),
+        g_ashp.sum(), g_imm.sum(), can_open.sum(), len(df_train),
     )
 
-    # -- Step 4: Combine gates then apply 2-step opening persistence --------
-    # All six gates must be true
-    raw_valid = (g1.values & g2.values & g3.values & g4.values
-                 & g5.values & g6.values)
-
-    # Opening: also require the previous interval to have passed
-    valid_prev = np.roll(raw_valid, 1)
-    valid_prev[0] = False
-    valid = raw_valid & valid_prev
-
-    # -- Step 5: Apply NaN guard ---------------------------------------------
-    accepted_arr = valid & (~has_nan).values & has_finite_pair.values
-
-    # -- Step 6: Build per-interval diagnostics DataFrame --------------------
-    diag = pd.DataFrame({
-        "time": df_train.index,
-        "g1_flow_dt": g1.values,
-        "g2_flow_vol": g2.values,
-        "g3_power": g3.values,
-        "g4_bottom_rising": g4.values,
-        "g5_ashp_off": g5.values,
-        "g6_imm_off": g6.values,
-        "no_nan": (~has_nan).values,
-        "finite_pair": has_finite_pair.values,
-        "accepted": accepted_arr,
-    })
-
-    # Assign rejection reason (first failing condition)
-    reasons = []
-    for _, row in diag.iterrows():
-        if row["accepted"]:
-            reasons.append("")
-            continue
-        if not row["g1_flow_dt"]:
-            reasons.append("flow_dt_low")
-        elif not row["g2_flow_vol"]:
-            reasons.append("flow_vol_low")
-        elif not row["g3_power"]:
-            reasons.append("power_low")
-        elif not row["g4_bottom_rising"]:
-            reasons.append("bottom_not_rising")
-        elif not row["g5_ashp_off"]:
-            reasons.append("ashp_on")
-        elif not row["g6_imm_off"]:
-            reasons.append("imm_on")
-        elif not row["no_nan"]:
-            reasons.append("has_nan")
-        elif not row["finite_pair"]:
-            reasons.append("no_finite_pair")
-        else:
-            reasons.append("persistence")
-    diag["reject_reason"] = reasons
-
-    n_accepted = int(accepted_arr.sum())
-    logger.info(
-        "Accepted ST-only intervals: %d / %d (%.1f%%)",
-        n_accepted, len(df_train), 100.0 * n_accepted / len(df_train),
-    )
-
-    # -- Step 7: Segment contiguous accepted intervals into windows ----------
-    # Opening: first accepted interval after 2-step persistence (already baked
-    #          into accepted_arr).
-    # Closing: window closes only when TWO consecutive intervals are invalid
-    #          (hysteresis — a single blip does not end the window).
+    # -- 4. State machine: open / continue / close ---------------------------
     windows: List[STWindow] = []
     wid = 0
-
     in_window = False
     win_start = 0
-    pending_close = False   # True after the first invalid interval inside a window
+    flat_count = 0  # consecutive non-rising bottom intervals
 
-    for k in range(len(accepted_arr)):
-        if accepted_arr[k]:
-            if not in_window:
-                win_start = k
+    for k in range(len(df_train)):
+        if not in_window:
+            if can_open[k]:
                 in_window = True
-            pending_close = False   # reset: valid interval cancels a pending close
+                win_start = k
+                flat_count = 0
         else:
-            if in_window:
-                if not pending_close:
-                    # First invalid — arm the close but keep the window open
-                    pending_close = True
-                else:
-                    # Second consecutive invalid — close the window
-                    # The window ends at k-2 (last accepted interval before the
-                    # first invalid that armed the close)
-                    win_end = k - 2
-                    n_int = win_end - win_start + 1
-                    if n_int >= cfg.min_st_intervals:
-                        windows.append(STWindow(
-                            window_id=wid,
-                            start=df_train.index[win_start],
-                            end=df_train.index[win_end],
-                            n_intervals=n_int,
-                            indices=np.arange(win_start, win_end + 1),
-                        ))
+            # Continuation: bottom still rising?
+            if bottom_rising[k]:
+                flat_count = 0
+            else:
+                flat_count += 1
+                if flat_count >= cfg.bottom_flat_close:
+                    # Close: trim to last rising interval
+                    win_end = k - flat_count
+                    _emit_window(windows, wid, win_start, win_end,
+                                 df_train, cfg, bottom)
+                    if windows and windows[-1].window_id == wid:
                         wid += 1
                     in_window = False
-                    pending_close = False
+                    flat_count = 0
 
-    # Handle window still open at end of data
+    # Handle window open at EOF
     if in_window:
-        # If a close was pending the last valid interval was at len-2 (or len-1
-        # if the very last sample was invalid but only one in a row)
-        win_end = (len(accepted_arr) - 2) if pending_close else (len(accepted_arr) - 1)
-        win_end = max(win_end, win_start)   # guard against degenerate case
-        n_int = win_end - win_start + 1
-        if n_int >= cfg.min_st_intervals:
-            windows.append(STWindow(
-                window_id=wid,
-                start=df_train.index[win_start],
-                end=df_train.index[win_end],
-                n_intervals=n_int,
-                indices=np.arange(win_start, win_end + 1),
-            ))
-            wid += 1
+        win_end = len(df_train) - 1 - flat_count
+        _emit_window(windows, wid, win_start, win_end, df_train, cfg, bottom)
 
-    # -- Step 8: Summary logging ---------------------------------------------
-    total_intervals_in_windows = sum(w.n_intervals for w in windows)
+    total = sum(w.n_intervals for w in windows)
     logger.info(
-        "ST-only windows: %d  (total intervals in windows: %d)",
-        len(windows), total_intervals_in_windows,
+        "Detected %d ST windows (%d intervals total)",
+        len(windows), total,
     )
 
+    # -- 5. Diagnostics DataFrame --------------------------------------------
+    accepted = np.zeros(len(df_train), dtype=bool)
+    for w in windows:
+        accepted[w.indices] = True
+
+    diag = pd.DataFrame({
+        "time": df_train.index,
+        "st_power_kw": df_train[cfg.st_power_col].values,
+        "bottom_c": bottom,
+        "dT_bottom": dT_bottom,
+        "bottom_rising": bottom_rising,
+        "g_power": g_power,
+        "g_rise_start": g_rise,
+        "g_ashp_off": g_ashp,
+        "g_imm_off": g_imm,
+        "in_window": accepted,
+    })
+
     return windows, diag
+
+
+def _emit_window(
+    windows: List[STWindow],
+    wid: int,
+    win_start: int,
+    win_end: int,
+    df_train: pd.DataFrame,
+    cfg: STFitConfig,
+    bottom: np.ndarray,
+) -> None:
+    """Append a window if it meets the minimum-length criterion."""
+    win_end = max(win_end, win_start)
+    n_int = win_end - win_start + 1
+    if n_int < cfg.min_st_intervals:
+        return
+    windows.append(STWindow(
+        window_id=wid,
+        start=df_train.index[win_start],
+        end=df_train.index[win_end],
+        n_intervals=n_int,
+        indices=np.arange(win_start, win_end + 1),
+    ))

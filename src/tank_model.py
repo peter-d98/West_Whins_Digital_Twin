@@ -21,13 +21,6 @@ from typing import Optional
 
 import numpy as np
 
-from ST_fitting.st_model import (
-    predict_q_sol_kwh,
-    predict_t_flow_c,
-    solar_active,
-    st_node_weights_from_tflow,
-)
-
 logger = logging.getLogger(__name__)
 
 # Physical constants
@@ -101,51 +94,6 @@ class TankParams:
         ], dtype=float)
 
 
-@dataclass
-class STModelParams:
-    """Fitted parameters for the dynamic ST sub-model.
-
-    Loaded from ``st_fit.json`` and passed to ``tank_step`` / ``simulate``
-    to enable GTI-driven ST prediction with dynamic node allocation.
-
-    Attributes
-    ----------
-    q0_kwh         : Q_sol regression intercept [kWh].
-    q1_kwh_per_wm2 : Q_sol regression slope [kWh / (W/m²)].
-    q2_kwh_per_c   : Q_sol coefficient on bottom-node temperature [kWh / °C].
-    q3_kwh_per_c   : Q_sol coefficient on outdoor temperature [kWh / °C].
-    b0_c           : T_flow intercept [°C].
-    b1_per_c       : T_flow coefficient on T_bottom [–].
-    b2_c_per_wm2   : T_flow coefficient on GTI [°C / (W/m²)].
-    gti_min_wm2    : Minimum GTI for activation [W/m²].
-    t_bottom_max_c : Bottom-node saturation temperature [°C].
-    """
-    q0_kwh: float = 0.0
-    q1_kwh_per_wm2: float = 0.0
-    q2_kwh_per_c: float = 0.0
-    q3_kwh_per_c: float = 0.0
-    b0_c: float = 0.0
-    b1_per_c: float = 0.0
-    b2_c_per_wm2: float = 0.0
-    gti_min_wm2: float = 180.0
-    t_bottom_max_c: float = 55.0
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "STModelParams":
-        """Construct from the ``st_fit.json`` content dictionary."""
-        return cls(
-            q0_kwh=d["Q_sol"]["q0_kwh"],
-            q1_kwh_per_wm2=d["Q_sol"]["q1_kwh_per_wm2"],
-            q2_kwh_per_c=d["Q_sol"].get("q2_kwh_per_c", 0.0),
-            q3_kwh_per_c=d["Q_sol"].get("q3_kwh_per_c", 0.0),
-            b0_c=d["T_flow"]["b0_c"],
-            b1_per_c=d["T_flow"]["b1_per_c"],
-            b2_c_per_wm2=d["T_flow"]["b2_c_per_wm2"],
-            gti_min_wm2=d["activation"]["gti_min_wm2"],
-            t_bottom_max_c=d["activation"]["t_bottom_max_c"],
-        )
-
-
 def tank_step(
     T: np.ndarray,
     Q_st_kwh: float,
@@ -155,24 +103,22 @@ def tank_step(
     params: TankParams,
     dt_s: float = 1800.0,
     *,
-    gti_wm2: Optional[float] = None,
-    st_params: Optional[STModelParams] = None,
+    f_st_ext: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Advance the 4-node tank by one time step (Euler forward).
 
     Parameters
     ----------
     T : array of shape (4,) — current temperatures [°C].
-    Q_st_kwh : ST heat this interval [kWh].  Used by the legacy (fixed f_st)
-        pathway.  Ignored when *gti_wm2* and *st_params* are provided.
+    Q_st_kwh : ST heat this interval [kWh].
     Q_ashp_kwh, Q_imm_kwh : heat inputs this interval [kWh].
     T_amb : ambient temperature [°C].
     params : TankParams instance.
     dt_s : time-step in seconds (default 1800 = 30 min).
-    gti_wm2 : Optional — current GTI [W/m²].  When provided together with
-        *st_params*, the dynamic ST sub-model is used instead of fixed f_st.
-    st_params : Optional :class:`STModelParams` with fitted regression
-        coefficients for Q_sol and T_flow.
+    f_st_ext : Optional array of shape (4,) — external ST node allocation
+        weights.  When provided, overrides ``params.f_st`` for this step.
+        This allows callers to pre-compute dynamic node allocation outside
+        the tank model (e.g., from solar regressions).
 
     Returns
     -------
@@ -181,39 +127,20 @@ def tank_step(
     T = np.array(T, dtype=float)
     T_new = T.copy()
 
-    dt_h = dt_s / 3600.0
-
-    # -- Determine ST heat and per-node weights ------------------------------
-    if gti_wm2 is not None and st_params is not None:
-        # Dynamic pathway: predict Q_sol and T_flow from GTI + state
-        if solar_active(gti_wm2, T[0], st_params.gti_min_wm2, st_params.t_bottom_max_c):
-            Q_st_kwh_eff = predict_q_sol_kwh(
-                gti_wm2,
-                st_params.q0_kwh,
-                st_params.q1_kwh_per_wm2,
-                t_bottom_c=T[0],
-                t_out_c=T_amb,
-                q2_kwh_per_c=st_params.q2_kwh_per_c,
-                q3_kwh_per_c=st_params.q3_kwh_per_c,
-            )
-            t_flow = predict_t_flow_c(T[0], gti_wm2, st_params.b0_c, st_params.b1_per_c, st_params.b2_c_per_wm2)
-            f_st_dyn = st_node_weights_from_tflow(T, t_flow)
-        else:
-            Q_st_kwh_eff = 0.0
-            f_st_dyn = np.zeros(4)
+    # Determine ST node allocation weights
+    if f_st_ext is not None:
+        f_st = np.asarray(f_st_ext, dtype=float)
     else:
-        # Legacy pathway: use supplied Q_st_kwh with fixed f_st
-        Q_st_kwh_eff = Q_st_kwh
-        f_st_dyn = params.f_st
+        f_st = params.f_st
 
     # Convert kWh → kJ for the interval
-    Q_st_kj  = Q_st_kwh_eff * 3600.0
+    Q_st_kj   = Q_st_kwh * 3600.0
     Q_ashp_kj = Q_ashp_kwh * 3600.0
     Q_imm_kj  = Q_imm_kwh * 3600.0
 
     for i in range(4):
         # Heat input to this node [kJ]
-        dQ = (f_st_dyn[i] * Q_st_kj
+        dQ = (f_st[i] * Q_st_kj
               + params.f_ashp[i] * Q_ashp_kj
               + params.f_imm[i] * Q_imm_kj)
 
@@ -244,8 +171,7 @@ def simulate(
     params: TankParams,
     dt_s: float = 1800.0,
     *,
-    gti: Optional[np.ndarray] = None,
-    st_params: Optional[STModelParams] = None,
+    f_st_ext: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Run the tank model over N time steps.
 
@@ -256,10 +182,10 @@ def simulate(
     T_amb : ambient temperature array of shape (N,) [°C].
     params : TankParams.
     dt_s : time-step seconds.
-    gti : Optional array of shape (N,) — GTI values [W/m²].
-        When provided together with *st_params*, activates the dynamic
-        ST sub-model inside each call to ``tank_step``.
-    st_params : Optional :class:`STModelParams`.
+    f_st_ext : Optional array of shape (N, 4) — external ST node allocation
+        weights per step.  When provided, overrides ``params.f_st`` at each
+        step.  This allows callers to pre-compute dynamic node allocation
+        outside the tank model (e.g., from solar regressions).
 
     Returns
     -------
@@ -271,9 +197,8 @@ def simulate(
 
     for k in range(N):
         kw: dict = {}
-        if gti is not None and st_params is not None:
-            kw["gti_wm2"] = float(gti[k])
-            kw["st_params"] = st_params
+        if f_st_ext is not None:
+            kw["f_st_ext"] = f_st_ext[k]
         T_hist[k + 1] = tank_step(
             T_hist[k],
             float(Q_st[k]),
