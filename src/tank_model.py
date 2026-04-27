@@ -26,12 +26,13 @@ logger = logging.getLogger(__name__)
 # Physical constants
 _RHO = 1.0        # kg/L
 _CP  = 4.186      # kJ/(kg·K)
-NODE_CAP = np.array([
-    170.0         * _RHO * _CP,   # bottom  → 711.62 kJ/K
-    (380.0 / 3.0) * _RHO * _CP,   # mid     → 530.21 kJ/K
-    (380.0 / 3.0) * _RHO * _CP,   # mid-hi  → 530.21 kJ/K
-    (380.0 / 3.0) * _RHO * _CP,   # top     → 530.21 kJ/K
-])  # shape (4,), kJ/K, bottom→top
+NODE_VOLS = np.array([
+    170.0,                # bottom
+    380.0 / 3.0,          # mid     ≈ 126.67 L
+    380.0 / 3.0,          # mid-hi  ≈ 126.67 L
+    380.0 / 3.0,          # top     ≈ 126.67 L
+])  # shape (4,), litres, bottom→top
+NODE_CAP = NODE_VOLS * _RHO * _CP   # kJ/K, bottom→top
 
 
 @dataclass
@@ -160,6 +161,79 @@ def tank_step(
     # Enforce plausible bounds
     T_new = np.clip(T_new, 5.0, 95.0)
     return T_new
+
+
+def dhw_step(
+    T: np.ndarray,
+    V_draw_l: float,
+    T_mains_c: float = 10.0,
+    mode: str = "cascade",
+) -> np.ndarray:
+    """Apply a domestic-hot-water draw to the 4-node tank.
+
+    Two propagation modes are supported:
+
+    ``mode="cascade"`` (default) — piston-flow cascade. A volume
+    ``V_draw_l`` of hot water is removed from the top node and replaced
+    by mains-temperature water entering the bottom node; each node
+    loses ``V_draw_l`` litres of its own water (which moves up to the
+    next node) and gains the same volume from the node below:
+
+        T_new[i] = ((V[i] - V_d) * T[i] + V_d * T[i-1]) / V[i]   (i = 1..3)
+        T_new[0] = ((V[0] - V_d) * T[0] + V_d * T_mains) / V[0]
+
+    ``mode="bottom_only"`` — bottom-only sink. Mains water mixes only
+    into the bottom node; upper nodes are unchanged by the draw itself
+    and feel it only indirectly via inter-node conduction (``UA_adj``)
+    on the next simulate step. This is phenomenological — energy is
+    not conserved across the tank in a single call — but reflects the
+    observation that small slow draws may locally cool the bottom
+    rather than propagate as an instantaneous piston.
+
+        T_new[0] = ((V[0] - V_d) * T[0] + V_d * T_mains) / V[0]
+        T_new[1..3] = T[1..3]
+
+    Parameters
+    ----------
+    T : np.ndarray, shape (4,)
+        Current node temperatures [°C], bottom→top.
+    V_draw_l : float
+        Draw volume in litres.  Clipped to ``[0, min(NODE_VOLS)]`` so a
+        single call stays within the validity of the one-step model.
+        For larger draws the function should be called repeatedly with
+        smaller chunks.
+    T_mains_c : float
+        Mains cold-water inlet temperature [°C].
+    mode : str
+        ``"cascade"`` or ``"bottom_only"``.
+
+    Returns
+    -------
+    np.ndarray, shape (4,)
+        Updated node temperatures [°C], clipped to [5, 95].
+    """
+    if V_draw_l <= 0.0:
+        return T.copy()
+
+    V_max = float(np.min(NODE_VOLS))
+    V_d = float(min(V_draw_l, V_max))
+
+    T_new = T.copy()
+    if mode == "cascade":
+        # Cascade top → bottom.
+        for i in (3, 2, 1):
+            V_i = NODE_VOLS[i]
+            T_new[i] = ((V_i - V_d) * T[i] + V_d * T[i - 1]) / V_i
+        V_b = NODE_VOLS[0]
+        T_new[0] = ((V_b - V_d) * T[0] + V_d * T_mains_c) / V_b
+    elif mode == "bottom_only":
+        V_b = NODE_VOLS[0]
+        T_new[0] = ((V_b - V_d) * T[0] + V_d * T_mains_c) / V_b
+        # Upper nodes unchanged; they feel the draw via UA_adj conduction.
+    else:
+        raise ValueError(f"Unknown dhw_step mode: {mode!r}")
+
+    return np.clip(T_new, 5.0, 95.0)
 
 
 def simulate(

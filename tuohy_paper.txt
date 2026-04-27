@@ -1,0 +1,774 @@
+ORCHESTRATION OF  DEM AND S AND RENEWABLE GENERAT ION IN 
+LOW ENERGY BUILDINGS AND DISTRICTS .  
+P.G.Tuohy* a, A.D.Peacockb, E.Owensb, R. McGheea, J.Kima, A.Samuela, D.Corneb, M. Dissanayakeb,  
+S. Santonjac, D.Todolic. 
+a. Energy Systems Research Unit, University of Strathclyde, Glasgow, UK. 
+b. Energy Academy, Herriot Watt University, Edinburgh, UK. 
+c. ITI, Instituto Tecnológico de Informática, Valencia 46022, Spain. 
+*corresponding author paul.tuohy@strath.ac.uk 
+ABSTRACT  
+The objective of the ‘Orchestration of Renewable Integrated Generation in Neighborhoods’ ( ORIGIN) project 
+was to maximize use of local renewables and minimize energy imports. This paper presents the ORIGIN 
+approach, demonstration sites, and key findings with a focus on load shift mechanisms and results. Focus is on 
+a 75 building predominantly  residential community with wind and solar generation . The ORIGIN system  used 
+forecasts of weather, renewable generation , demand, and load shift opportunities, as inputs to  optimization 
+algorithms which output information to displays  and remotely controlled loads. Web and phone widgets 
+provided current and forecast green energy availability. Information widgets alone did not give  a measurable 
+demand response. A financial incentive (green energy tariff) was added, an initial response was seen in 47% of 
+households, 21% continued to  the end of  the 6 month tariff trial, p rojected across t he c ommunity this 
+response was projected to give a 6MWh (1 .2%) reduction in grid imports from 511 to 505MWh p.a.  A remote 
+control approach  was developed applicable to appliances,  EV charging, water pumping, mobile device 
+charging, and space and water heating . It was implemented for existing solar thermal systems with electric 
+backup, this gave a 44% reduction in summer electricity use, and 22% increase in loads met from renewable 
+electricity. This scheme was modeled to give a 13% reduction in  community electricity imports from 511 to 
+446MWh p.a. Future app lication of ORIGIN type systems, and methods for their design and integration are 
+discussed. 
+KE Y WO R D S: DSM, Load Shifting, Storage, Renewable Generation, District, Low Energy Building. , Solar 
+Thermal, ORIGIN, Thermal Storage. 
+1.  INTRODUCTION  
+There have been many efforts worldwide focused on load shaping and demand side management through real 
+time pricing, storage and control schemes  [1, 2, 3, 4, 5, 6, 7, 8, 9]. The ORIGIN project [10, 11, 12] took three 
+existing eco -communities with high local renewable integration and sought to develop advanced algorithms 
+and methodologies that could significantly increase the extent to which use is made of the local renewable 
+generation and reduce the extent to which energy needs to be imported to the community.  
+The ORIGIN hypothesis was that a system could be developed to make better use of local renewables through : 
+(i) stimu lating occupants to change behaviors , and (ii) remote control of loads . This concept wa s tested 
+through developing, deploying and evaluating such a system. 
+This paper is intended to give an overview of the ORIGIN  project and summarize a selection of key outcomes 
+focused on load shift mechanisms and observed results. Firstly the demonstration site is described. Then  the 
+overall ORIGIN methodology s pecified. Next the information  feedback and variable tariff system s and results 
+
+are described. The remote control approach is then described and illustrated for  a solar thermal system for 
+space heating and hot water. Results and wider implications are discussed including how buildings and systems 
+can be designed to have increased energy autonomy and reduced grid dependence. 
+This paper cove rs the broad scope of the ORIGIN  project and necessarily gives only selected highlights. The 
+development of the user interfaces  and mathematical algorithms are described in more detail elsewhere [13, 
+14, 15, 16].  
+2.  DEMONSTRATION SITE . 
+The ORIGIN project engaged with three eco -communities with high renewable generation: Findhorn in the 
+north of Scotland, Damanhur in the north of Italy and Tamera in central Portugal. These sites have very 
+different characteristics : Findhorn has 4 wind turbines with 750kW wind capacity, a grid connected private 
+wire electrical network, over 75 buildings including 15 non -domestic buildings, high penetration of solar 
+thermal systems, a range of heating systems including heat pumps, stand alone and district biomass, generally 
+well insulated buildings including some approaching Passivhaus  standard, some photovoltaic generation, and 
+some electric Vehicles; Damanhur has high levels of public grid connected photovoltaic  panels, biomass and 
+solar thermal systems serving a large commercial and retail building plus a number of 20 person communal 
+residences; Tamera has a large islanded photovoltaic and battery storage system, a sma ll number of shared 
+community buildings, solar thermal systems, electric vehicles and water pumping loads. Given its larger scale, 
+the fact that its systems form a super -set of those in the other  communities, and it being typical of future 
+northern EU settlements, the focus in this paper is on Findhorn [17]. 
+The 750kW of wind generation at Findhorn allows the community to be around 'net zero' in terms of its 
+electricity supply from the grid but the actual supply / demand balance is highly variable. Figure 1  shows the 
+renewable supply to demand matching for 4 days in February 2015 illustrating periods when surplus is 
+exported to the grid and shortfall when grid electricity is imported. The situation during the year from 1st 
+September 2014 to  31st August 2015  was that electricity consumed was 1132MWh and local renewable 
+generation was 1205MWh but only 621MWh of the local generation was consumed and the rest (584MWh) 
+exported to the grid, imports from the grid were 511MWh . The aim of ORIGIN was to re -shape the l oad to 
+make more use of the local renewable generation and reduce energy imports.   
+ 
+Fig. 1. Findhorn Supply / Demand surplus and shortfall in kWh per 30min period.  
+2.1  AU DI T,  MO NI TO RI NG,  AN D  ID EN TI FI C ATI O N O F  LO A D  S HI F T OP P O RTU NI TI ES. 
+The starting point for the ORIGIN process was an audit of the communities designed to  map the community 
+energy flows, establish renewable and non renewable energy system characteristics , and identify potential 
+load shaping opportunities. The next step was to establish energy monitoring to support performance 
+quantification and algorithm development. 
+Based on review of the works of others  and brainstorming at the start of the project 24 di fferent lo ad shift 
+opportunity types were identified.  These were grouped under three categories (figure 2): thermal controllable 
+loads, electrical controllable loads, and personal behavioral  / informational loads. Thermal controllable loads 
+-200
+-100
+0
+100
+200
+300
+0 12 0 12 0 12 0 12 0
+surplus shortfall
+
+(TCL) are those where some heating or cooling demand is to be met and there is some pot ential for thermal 
+storage that can be related in some way to a temperature measurement and controlled directly through the 
+ORIGIN system. Electrical controllable loads (ECL) are those that are not related to a thermal measurement but 
+can be directly contr olled. Personal behavioral loads are those that can only be indirectly controlled through 
+ORIGIN information flow but rely on human interventions. 
+ 
+Fig. 2. Opportunity map: thermal controllable load (TCL), electrical controllable load (ECL) , informational (Y). 
+After the audit analysis t wo building types at Findhorn (figure 3) were adopted as focus buildings for intensive 
+monitoring and automated control within the project. These were selected based on the available load shift 
+opportunities (electric space and water heating  with water storage ) and also as representative of increasingly 
+common building types, maximizing the potential for replication elsewhere.  
+The first building type identified is the 'Centini' which is a terraced domestic building with high  insulation, a 
+large solar thermal panel feeding a 500  litre thermal store (for both space and domestic hot water heating ) 
+with backup direct electrical heating supplied with night time reduced tariff electricity .  There are 14 of these 
+dwellings at Findhorn. The second type is the 'Whins' which is a dwelling constructed in 2012 at close to 
+Passivhaus standards, serviced with an air -sourced heat pump with backup electric boost heater and a so lar 
+thermal system .  T here are 24  of these  dwellings at Find horn.  Several of the Whins also have large 
+photovoltaics. This type was picked as being representative of a building type becoming more common in the 
+EU with a high load shift potential due to the presence of a 210  litre storage tank (for domestic hot wat er 
+heating only) and high building time constant. The main focus here was on Community level self consumption 
+but for the Whins the large building integrated PV allowed for building level self -consumption also to be 
+considered.  
+ 
+Fig. 3. Focus Building Types: (a) Whins; (b) Centini. 
+These building types were then subjected to in depth monitoring aimed at supporting the full orchestration 
+algorithms including remote control of loads . O ther building types which were to receive information only 
+were monitored less intensively.   
+3. THE ORCHESTRATION SYSTEM  AND ALGORITHMS . 
+
+
+The ORIGIN system was cloud based, inputs were received from monitoring and/or control devices, algorithms 
+used this data to generate information  and control outputs which are delivered back to the communities  and 
+individual buildings. The informational feedback was through a library of widgets viewed through web portals 
+and displayed on personal computer, tablet, or phone. Direct control was achieved through remote switching 
+via 'smart plugs' either directly powering loads or powering relays inserted into existing control circuits.   
+To drive performance improvement a set of algorithms was developed to deliver  load shaping to best match 
+with forecast future generation. The ORIGIN algorithm component parts are: (i) a weather prediction algorithm 
+(WPA), (ii) a renewable generation prediction algorithm (RPA), (iii) a demand prediction algorithm  (DPA), (iv) a 
+generation/demand gap analysis , (v) a load shift opportunity prediction  algorithm (OPA), and (vi) an 
+orchestration and control algorithm (OCA) (Figure 4).   
+The OPA is used to produce predictions of future loads and a set of vectors representing possible load shifts 
+associated with those future loa ds capturing: timings, shifted load size, and cost factors including efficiency 
+and energy penalties associated with increased losses , reduced renewable heat inputs,  or reduced efficiencies 
+etc. The OCA at each iteration sifts these opportunities and selec ts the optimum set of control actions to best 
+match the required profile within the optimization criteria , and sets up a  control list to feed information 
+displays and remote controls to shape the future load.   
+The time-step between iterations of the algor ithm is flexible but currently set to 30 minutes although different 
+timebases are used to inform different aspects e.g. tariff commitments are triggered once per day and remain 
+fixed for a 30  hour horizon  to allow residents to plan their energy consumption .  The ORIGIN system utilizes 
+weather, demand and generation forecasts based on mathematical and statistical methods [13, 14, 15]. 
+ 
+Fig. 4. The ORIGIN algorithm component parts. 
+The approach taken was to implement the demand response mechanisms in a staged way in order to allow the 
+impacts of each to be distinguish ed. Initially informational feedbacks were provided at Community level, later 
+personalized feedback information at household level was provided, a differential tariff mechanism was added 
+next, and finally the remote control actuations were implemented  in a range of pilot studies . These various 
+implementations are described in the following sections, results presented  and then discussed, and future 
+work proposed. 
+4. INFORMATION  FEEDBACKS AND TARIFF  STIMULI . 
+The first stage of implementing the ORIGIN system was to provide a wide range of user selectable 
+performance feedback widgets to inform and engage the communities. These were designed through a 
+participative process. For example,  for real -time renewable energy availability the different communities 
+came up with designs that involved running horses, blooming flowers and traffic lights to indicate current 
+Information
+display
+Actuation 
+hardware / 
+software
+Monitoring 
+hardware / 
+software
+
+availability. Community artworks and installations incorporating visual and audible indicator s (music in laundry 
+rooms etc.) were also implemented [16]. 
+Two widgets designed to capture historical performance are shown in figure 5 .  T hese display feedback from 
+the previous day, week, and month or since the start of system deployment . The 'Green -O-meter' shows the 
+percentage of consumed electri city that originates from the local renewable generation  and the goal of the 
+project was to maximize this. Widgets can be selected that represent either the total community performance 
+or a specified individua l building performance. Widgets allow users to compare individual households against 
+Community average etc. 
+ 
+Fig. 5. Historical Performance Feedback Widgets: Energy Balance shows historical electrical energy flows; 
+Green-O-meter shows the % of consumed electricity that is from renewable.  
+To allow participants to plan their activities  to exploit forecasted surplus renewable energy , and reduce 
+demands at times of grid electricit y import, forecasting widgets (figure 6, 7 ) were provided incorporating  
+weather and renewable surplus/shortfall in various forms including a renewable energy availability clock. 
+ 
+Fig. 6. Behavior Stimulus Widgets: Weather; renewable surplus (green) / Shortfall forecast.  
+At a further stage the behavioral response stimuli was expand ed from information only to include flexible 
+electricity tariffs. These were set at a 4:1 ratio with t he renewable energy  available at 25% of the cost of the 
+'standard' rate (project funds were used to compensate the Community supply company ). The tariff  periods 
+were set on a daily basis around 6pm based  on surplus generation forecast  for the following day.  A tariff 
+forecast widget providing this information is illustrated in figure 6.    
+
+
+ 
+Fig. 7. Behavior Stimuli Widgets: Renewable Energy Availability Clock; Tariff Forecast. 
+A range of widgets were also developed to give feedback on the current and forecasted hot water availability 
+(volume, %  and temperature) and express this in terms of the number of 5 minute showers available etc.  
+(figure 8).  
+  
+Fig. 8. Behavior Stimulus Widget: Hot water current and future forecast availability. 
+4.1  R E S UL TS: IN FO R M ATI O N  AN D T ARI F F  STI M ULI .  P ER SO N A L  C O NT RO L L E D  LO A DS: 
+The initial 'information only' phase of the ORIGIN implementation in Findhorn did not yield a measurable load 
+shifting response.  
+The tariff system was then activated in 38 households over a 6 month period from March to September 201 5. 
+Analysis of variance analysis (ANOVA) of consumption profiles at high and low tariffs over 2 week periods  was 
+used to detect any behavioral changes and quantify response rates. It was calculated that 18 households (47%) 
+showed at least some significant engagement with the tariffs at least during one of the initial 2 week periods. 8 
+households (21%) remained engaged with the tariff signals and had a measurable response throughout.  
+Some motivated participants were observed to have made a large effort to use appliances in low tariff periods 
+while other unmotivated  participants did not show a response (figure 9 ). Energy s tories were gathered from 
+participants to understand physical and psychological reasons for different behaviors; in general ‘motivated 
+participants’ were both available and chose to treat  the tariff 'game'  as a personal challenge; ‘unmotivated 
+participants’ tended to be people with energy use patterns that did not lend themselves to engagement or 
+who did not choose to make it a priority. Responses were less in un -occupied or sleeping times even for 
+motivated participants, as would be expected.   
+
+
+ 
+Fig. 9. Tariff responses for a motivated and unmotivated participant.  
+Energy use patterns pre ORIGIN (May to October 2014) and during the ORIGIN tariff implementation period 
+were analyzed. The loads that were shifted most often were washing machines and dish washers with an 
+increase in co-incidence of washing machine operations in renewable energy surplus periods observed in 
+active participant households after the tariff periods were implemented (Fig. 10). Other behavioral changes 
+mentioned in the energy narratives provided by the participants included grass cutting, showering, and baking.  
+ 
+Fig. 10. Tariff response: washing machine operations co-incidence with renewable generation pre and post 
+tariff deployment plotted against wind generation capacity factor (= wind turbine output/wind turbine rating). 
+Relationships capturing demand response as a function of wind tariff periods  were used to predict the 
+response were the system to be deployed across the entire 75 building Findhorn Community. These predict an 
+annual increase in consumption in low tariff periods of 9.2MWh if the same overall response rates (21% 
+engagement, average response s) as seen in the pilot were seen. The daily forecasting of generation surplus 
+periods was however found to be only 69% accurate *ref+, a function of the ‘once a day’ tariff setting process 
+relying on fixed day ahead forecasts, this has the impact that consumption during lower tariff periods is not i n 
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+0 2 4 6 8 10 12 14 16 18 20 22 24
+Demand (kW)
+Time of day (h)
+Demand at High Tariff Demand at Low Tariff
+Motivated participant
+% operations in RE surplus
+0
+5
+10
+15
+20
+25
+30
+35
+40
+45
+50
+0 5 10 15 20 25
+Washing machine cycles coincident with 
+RE surplus (%)
+Wind generation capacity factor (%)
+0
+5
+10
+15
+20
+25
+30
+35
+40
+45
+50
+0 5 10 15 20 25
+Washing machine cycles coincident with 
+RE surplus (%)
+Wind generation capacity factor (%)
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+0 2 4 6 8 10 12 14 16 18 20 22 24
+Demand (kW)
+Time of day (h)
+Demand at High Tariff Demand at Low Tariff
+Unmotivated participant
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+0 2 4 6 8 10 12 14 16 18 20 22 24
+Demand (kW)
+Time of day (h)
+Demand at High Tariff Demand at Low Tariff
+Motivated participant
+% operations in RE surplus
+0
+5
+10
+15
+20
+25
+30
+35
+40
+45
+50
+0 5 10 15 20 25
+Washing machine cycles coincident with 
+RE surplus (%)
+Wind generation capacity factor (%)
+0
+5
+10
+15
+20
+25
+30
+35
+40
+45
+50
+0 5 10 15 20 25
+Washing machine cycles coincident with 
+RE surplus (%)
+Wind generation capacity factor (%)
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+0 2 4 6 8 10 12 14 16 18 20 22 24
+Demand (kW)
+Time of day (h)
+Demand at High Tariff Demand at Low Tariff
+Unmotivated participant
+
+fact 100% from local renewable generation, reducing the achieved increased renewable electricity self -
+consumption to 6.3MWh.  The information plus tariff stimulus would decreased grid imports from the current 
+511MWh p.a. to 505MWh ( a 1.2% reduction). If all participants exhibited the ‘motivated participant’ response 
+(however unlikely) then imports would decrease  to 573MWh (7.6% reduction) . While behavioral response has 
+a role to play  in some situations , other load shifting methods would be required higher levels of  external 
+energy independence.  
+5. THE REMOTE CONTROL SYSTEM . 
+Load switching hardware based on remote control of smartplugs was implemented into existing systems to 
+give remote control of thermostatically controlled loads (TCLs) and electrically controlled loads (ECLs).  
+The load shift opportunity predic tion algorithm (OPA) produces a set of multi -parameter vectors capturing 
+forecast potential for advancing or delaying the  loads within the  allowed service window.  The optimization 
+algorithm then selects appropriate control actions and implements these through the smart plugs.   
+The electrically controlled loa ds (ECLs) are simply controlled to allow shifting of the predicted loads within 
+negotiated service windows e.g. service must be complete by m orning, must be complete by 5pm etc.  
+For space and water heating TCLs the service window is more complex and model based predictive control was 
+developed to a llow the characteristics of systems, losses and de -stratification, user comfort, user behavior , 
+and weather effects to be incorporated. The remote control algorithm for TCLs is described below, ECL control 
+is a subset.. 
+For space and water heating the smart plugs are implemented to override the standard on/off control signals, 
+thermostats (and safety) are not affected and users can resume normal operation if desired.  
+At Findhorn figure 11(a) and (b) show the total daily profile of heating and hot water load for the electrically 
+heated dwellings  (14 Centini dwellings, and 25 Whin  dwellings) over the same period as in figure 1. Centini 
+systems are charged for a 3 hour period programmed to be during a lower cost off -peak tariff window from 
+00:00 to 07:00 each night, Whins systems are set to charge the hot water tanks to comfort temperature eac h 
+morning prior to morning demand,  and provide daytime space heating  if required on a standard daily profile  
+(am and pm 'occupied' heating periods at 21 oC with night and day setback at 18 oC). The Whins have a 
+programmed steriliz e cycle which boost-heats th e tank to 70 oC periodically. The Centini and Whins average 
+heating plus hot water daily demands were measured to be 14 and 17kWh respectively for February, and 
+3kWh for each type for June. This gives a potentially shiftable daily energy load for the 14 Cen tini plus 24 
+Whins dwelling s of 600kWh in February and 120kWh in June. Each Centini has a heating load of 4.2kW durin g 
+charging and the Whins 3kW. Total cumulative power able to be shifted was around 130kW. 
+Figure 11(c) shows the top and bottom storage tank temperatures in oC for a Whin for a period inc luding 4 
+morning tank charges  (top and bottom temperature s both increase ) and regular morning bathing cycles  
+(bottom temperature drop s), on the second day the charge te mperature is boosted with the impact that no 
+charge is then required for day 3, illustrating the potential for hot water load shifting on a day to day scale.  
+
+    
+ Fig. 11. Shiftable loads over a day: (a) Centini (14); (b) Whins (24), kWh/30mins. (c) Whins top and bottom 
+tank temperatures for 4 days: extra load in day 2 allows load to be skipped in day 3. 
+Control of hot water storage systems feeding space and domestic hot water demands, and with solar thermal 
+inputs, is the most complicated case . A lgorithms developed for these  systems are elaborated in the next 
+section, using the Centini. 
+5.1  MO D EL  P R EDI C TI V E  CO NT RO L FO R SO L AR  TH ER M A L S Y ST E M S 
+The Centini  system is illustrated in figure 8 . Optimal control of  the system must consider the solar thermal 
+inputs as well as the other system and user  characteristics in quantifying opportunities for shifting  the 
+electrical heater inputs normally set for the night time off peak period.   
+The situation is variable in summer and winter. In winter solar gains and solar flow temperatures are less and 
+heating demands greater, so the synchronization of the electrical demand to best match renewable generation 
+within the comfort window is the  primary concern.  In summer the re is significant potential fo r high 
+temperature solar energy inputs and the aim becomes one of  maximising solar input  and avoiding backup 
+heating while also making sure that any electricity required is renewable.  
+To predict the load shift vectors (see section 3) it is necessary to capture system characteristics in a model.  The 
+ideal model is detailed enough to represent system behavior but able to be informed by relatively simple 
+monitoring. The approach taken in the ORIGIN project was to initially use a superset  of sensors to gather data 
+to inform the model based algorithms , including solar, space heating, and domestic hot water heat meters 
+(figure 12) and 6 tank temperatures ; subsequently a simpler and lower cost reduced set was considered. A  6 
+segment energy balance model of the tank adapted from that of Duffie and Beckman [18] was selected where 
+each segment has an energy stor ed associated with its mean temperature. These segment temperatures are 
+then modified in the model based on relevant energy and water inputs and outputs. The 6 seg ment 
+temperatures can be read for each timestep  from installed ORIGIN sensors , and then future temperatures 
+predicted using the simple model.  
+At each future timestep the predicted tank node temperatures are calculated using  the following sequence: 1. 
+The temperature shifts due to predicted standing energy losses and internal circulations are applied (LOSS) ; 2. 
+The temperature shifts due to the predicted hot water and space heating energy demands are applied 
+(DHWout, SHout); 3. The calculated solar energy inputs (SOL in) are applied to nodes with temperatures below the 
+predicted solar flow temperature (T sol); 4. If the electric heating system  is on , then the calculated heating 
+energy inputs are applied to raise node temperature s towards their setpoints within the constraints of the 
+power available (E in). Then applying the same 4 steps will predict the temperatures at the next timestep 30 
+minutes after that, and so on, to give the predicted tank profile and energy inputs, loads a nd losses at each 
+30min step for the future 48 hour period. These measured and predicted temperatures are generated for a 
+oC
+No load
+kWh
+Extra load
+
+range of possible heating “on” times allowing the opportunity vectors to be determined  for timesteps where 
+comfort criteria (e.g. water flow temperature > 40oC) is still achieved.  
+Necessary inputs t o the model energy balance are: (i) physical parameters determined in the system audit  or 
+from manufactureres (volume, geometry e.g. position of immersion heater, inflows and outflows etc); (ii) t he 
+LOSS, DHWout, SHout, SOLin, Tsol,, Ein, functions informed by periodic (e.g. weekly) analysis of a 'learning' dataset 
+of the rolling previous 5 weeks  weather and monitoring points. User inputs can also be gathered to inform the 
+system of changes in behaviors e.g. holidays, visitors etc.  Figure 13 gives the opportunity prediction algorithm 
+flowchart.  
+ 
+Fig. 12. Centini Space Heating and Hot Water System Configuration  
+ 
+Fig. 13. TCL opportunity prediction algorithm 
+The underlying heat loss and de -stratification characteristics of the tank are determined as a function of 
+segment temperature by regression analysis in periods without other energy inflows and outflows. Standard 
+heating times and setpoints are  either inferred from the learning dataset , or from audit, or user inputs. The 
+desired comfort temperatures are either set at standard values or can be inferred , or adjusted based on user 
+inputs. Domestic hot water demands are set based on the pattern established from  the learning dataset from 
+patterns on occupied days and may be modified based on user inputs, process control statistics are established 
+(mean, sigma) to describe typical behaviour and may be used to detect and  respond to changes e.g. trigger a 
+query to the occupant [19]. The level of service can be adjusted by altering the statistical safeguard , (nominally 
+
+
++1 daily sigma), used in demand forecasts. Whe n space heating demands are also met from the storage tank 
+then demand (mean, sigma) is established from the rolling 5 week learning dataset as a function of time,  
+outdoor temperature and solar radia tion. Solar input  characteristics are established as functions of tank 
+conditions and solar illuminance from the learning dataset in a three step process: first the threshold 
+illuminance below which no solar input occurs is established; then the solar flow temperature dependence on  
+solar illuminance, tank temperatures, and outdoor temperature determined; finally the solar energy inpu t is 
+determined as a function of the predicted solar flow temperature and tank segment temperatures for the 
+given timestep.  
+The model based prediction methodology has so far yielded promising results meeting required standards for 
+building model calibration [20]. Figure 14 shows an example of predicted and actual performance of the model 
+for a Centini water tank for a 4 day period. The standard ON  time for the backup electric heater in this 
+particular system is 00:00 to 03:30. The predictions for the warme r top of the tank temperatures are most 
+important for the delivery of service. The largest discrepancy seen is for the lower temperature nodes due to 
+the stochastic occupant wat er draws being different to the  smoother predicted profile, the opportunity 
+quantification algorithm corrects for these offsets by re-forecasting based on the measured tank temperatures 
+at each future  time-step. The mean pl us 1 sigma (conservative worst case) demands are assumed in the 
+forward projections of the service window wit hin which the load can be flexed to provide a safeguard , this 
+conservatism is shown in the lower top temperatures and higher predicted than actual loads in figure 14. The 
+models are  iterated with the  mean water draw profile for load prediction . The  projection is updated each 
+timestep based on measured tank temperatures so that stochastic behaviour is accounted for.      
+ 
+Fig. 14. Predicted (top) v. Actual (bottom) Centini tank temperatures (oC) and heating loads (4.4kW heater) for 
+a 4 day period. 
+5.2  R E S UL TS OF  MO D E L  PR E DI CTI V E  CO NT RO L O F C EN TI NI  SO L AR  T H E RM A L S YS T EM. 
+The Opportunity prediction algorithm using the forecasts a nd model as described above was  deployed in a 
+single Centini dwelling for a n initial  trial period  in May and early June 2015.  Figure 15  illustrates algorithm 
+operation for a typical day at the 15:30 timestep. The projections for the 96 future timesteps  (48hrs) are 
+generated fo r: (i ) Standard electric heating ON  time (00:30 to 03:30 ) (Fig 10(a)) ; (ii ) N o heating applied  (Fig 
+10(b)); (iii) Each of the possible on-times within the 48hour hori zon. The algorithm operation is illustrated in 
+
+
+table 1, for reasons of clarity only 4-hourly future timestep operation is shown.). The ‘No heating applied’ ( Fig 
+10(b) scenario defines the service window within which the load can be shifted  while maintaining service i.e. 
+'Comfort OK'=1 in Table 1 if Ttank(top)>Tcomfort condition is met.  
+The OPA algorithm feeds the vectors associate d with each possible heating on time to the orchestration and 
+control algorithm (OCA) , which then deci des the correct operation  based on optimization criteria. In this 
+limited pilot the OCA only considered  this one opportunity (hot water electric heater) in this single dwelling, in 
+the full implementation the OCA considers all opportunities within the Community. 
+Table 1 and figure 15 illustrate OPA and OCA operation for 2 possible optimization criteria:  
+(i) To minimize energy cost (primarily through co-incidence with renewable surplus  low cost tariff) 
+the heating would be operated at timestep 43, shifting 6.1 kWh at high tariff to 9.5 kWh at  low 
+tariff (‘Best cost option’ column in table 1, figure 15c); 
+(ii) To minimize electricity use  the heating would be  operated at timestep 67, reducing the 2 day 
+total electricity load from 1 2.7 to 11.7 kWh  (figure 15 d) (primarily through lower losses due to 
+lower average tank temperatures).  (‘Lowest energy option’ table 1);  
+ 
+Fig.15: OPA output - Predicted tank temperatures (oC left) and heating load (kWh, right) for 96 30min 
+timesteps from 15:30 with:  a). Standard electric heating times (00:30 each day); b). No electric heating; c). 
+Minimum cost / maximum renewable electricity; d). Minimum electricity use.   
+Table 1: OPA output in 4 hourly timesteps showing load characteristics, comfort, and tariffs projected at 15:30 
+for standard loads (at 00:30) and each possible load shift case (16:00 and each 4 hourly step).  
+
+
+ 
+ 
+Fig.16: Solar irradiance (W/m2) over the 10 day trial period in June 2015. 
+A further 10 day pilot was then run in late June 2015. The solar irradiance during t his period is shown in figure 
+16. The operation of the algorithm during this pilot is again illustrated here using 4 -hourly timestep operation 
+and a 15.30 snapshot, for 2 differ ent days . Table 2 and figure 17  show OPA  and OCA operation on day 9  
+(30/06/2015). The ‘no heating  applied’ projection in this case shows that comfort can be maintained for the 
+entire 48hr period without electric backup heating. In this case the OCA acts so the load is skipped, potentially 
+avoiding 11.6kWh of electricity use, and increasing solar thermal input (QsolT column, table 2) from 3 to 12.5 
+kWh over the 2 day period (due to lower tank temperatures there is higher heat input from  the solar panel as 
+all nodes are significantly heated rather than only the bottom node). 
+Table 2: OPA output day 9, 15:30, 58oC initial temp, No renewable surplus, high solar gains. 
+day
+Future 
+Time-
+step
+Load On 
+Time
+load 
+day 1 
+(kWh)
+load 
+day 2  
+(kWh)
+Load 
+Total 
+(kWh) 
+comfort 
+OK 
+(1=Y)
+Sys Eff 
+Ratio
+Energy 
+Ratio
+Tariff  
+Ratio  
+(1:0.25) 
+ Energy 
+Cost 
+Ratio
+Best 
+cost 
+option
+Lowest 
+energy 
+option
+2 16:00:00 2.8 9.3 12.1 1 1.0 0.96 1 0.96 0 0
+10 20:00:00 4.4 8.1 12.5 1 1.0 0.98 1 0.98 0 0
+18 00:00:00 6.0 6.7 12.7 1 1.0 1.00 1 1.00 0 0
+19 00:30:00 6.1 6.6 12.7 1 1.0 1.00 1 1.00 0 0
+27 04:00:00 6.9 6.2 13.1 1 1.0 1.03 0.25 0.63 0 0
+35 08:00:00 8.8 4.4 13.2 1 1.0 1.04 0.25 0.52 0 0
+43 12:00:00 9.5 3.5 13.0 1 1.0 1.03 0.25 0.46 1 0
+51 16:00:00 0.0 12.4 12.4 1 1.0 0.98 1 0.98 0 0
+59 20:00:00 0.0 12.2 12.2 1 1.0 0.96 1 0.96 0 0
+67 00:00:00 0.0 11.7 11.7 1 1.0 0.92 1 0.92 0 1
+68 00:30:00 0.0 11.8 11.8 1 1.0 0.93 1 0.93 0 0
+76 04:00:00 0.0 12.4 12.4 0 1.0 0.98 1 0.98 na na
+84 08:00:00 0.0 13.2 13.2 0 1.0 1.04 1 1.04 na na
+92 12:00:00 0.0 13.2 13.2 0 1.0 1.04 1 1.04 na na
+3 96 No Load 0.0 0.0 0.0 0 1.0 0.00 0 0.00 na na
+1
+2
+
+
+ 
+ 
+Fig.17: OPA output - Predicted tank temperatures (oC left) and heating load (kW, right) from 15:30 with:  Left 
+graph - standard electric heating times (00:30 each day); Right graph - no electric heating.  
+Table 3 and figure 18  show OPA and OCA operation for day 8 (29/06/2015). The ‘no heating’ projection in this 
+case indicated that comfort can only be maintained without electric backup heating  until 4am ('Comfort OK' 
+column in table 3 ). In this case the  OCA acts so the  load ON time is advanced and applied immediately 
+reducing the projected 2 day load from 16.5kWh to 13.6kWh and increasing projected 2 day solar input from 
+4.4 to 7.4 kWh due to lower tank temperatures during the following solar gain period .  
+Table 3: OPA output Day 8, 15:30, No renewable surplus, high solar gains. 
+ 
+day Time-
+step Load On
+load 
+day 1 
+(kWh)
+load 
+day 2  
+(kWh)
+Load 
+Total 
+(kWh) 
+comfort 
+OK 
+(1=Y)
+RES 
+Surplu
+s (=1)
+Sys Eff 
+Ratio
+Energy 
+Ratio
+Tariff  
+Ratio  
+(1:0.25
+) 
+Best 
+cost 
+option
+Lowest 
+energy 
+option
+QsolT
+2 16:00:00 2.8 5.6 8.4 1 0 1.0 0.73 1 0 0 6.19
+10 20:00:00 4.3 5.6 9.9 1 0 1.0 0.86 1 0 0 4.83
+18 00:00:00 5.9 5.6 11.4 1 0 1.0 0.99 1 0 0 3.21
+19 00:30:00 6.0 5.6 11.6 1 0 1.0 1.00 1 0 0 3.02
+27 04:00:00 6.8 6.1 12.9 1 0 1.0 1.12 1 0 0 1.37
+35 08:00:00 5.4 4.4 9.7 1 0 1.0 0.84 1 0 0 4.66
+43 12:00:00 3.3 3.3 6.6 1 0 1.0 0.57 1 0 0 7.90
+51 16:00:00 0.0 5.7 5.7 1 0 1.0 0.49 1 0 0 8.94
+59 20:00:00 0.0 5.7 5.7 1 0 1.0 0.49 1 0 0 8.94
+67 00:00:00 0.0 5.6 5.6 1 0 1.0 0.48 1 0 0 9.31
+68 00:30:00 0.0 5.7 5.7 1 0 1.0 0.49 1 0 0 8.94
+76 04:00:00 0.0 6.5 6.5 1 0 1.0 0.56 1 0 0 7.80
+84 08:00:00 0.0 7.9 7.9 1 0 1.0 0.69 1 0 0 8.31
+92 12:00:00 0.0 6.1 6.1 1 0 1.0 0.52 1 0 0 11.06
+3 96 No Load 0.0 0.0 0.0 1 1 1.0 0.00 0 1 1 12.50
+1
+2
+
+
+ 
+Fig.18: OPA output - Predicted tank temperatures (oC left) and heating load (kW, right) from 15:30 with:  Left 
+graph - standard electric heating times (00:30 each day); Right graph – advanced electric heating to maximize 
+next day solar input.  
+Over the 10 day late June trial period loads were skipped on 5 days, and advanced on the remaining 5 days (to 
+maximize solar input), giving an energy saving o f 38.3kWh or 44%  (table 4). Within the 10 day pilot timeframe 
+there was no opportunity to exploit the low cost renewable surplus tariff as no high wind periods occurred.  
+Table 4: Standard v Orchestrated operation of the electric backup heater during the 10 day pilot period.  
+ 
+To further exercise the load shifting algorithms a second trial was run between September 1st and October 
+31st 2015 when there was significant wind gene ration. The Centini demand coincidence with surplus wind 
+generation under ORIGIN control was 35.2%, it was calculated that this would have  been 13.5% with standard 
+control (21.7% improvement). 
+These pilot studies were necessarily restricted due to limited timeframe and limited access to systems.  
+5.2  MO D ELI NG  ORIGIN  R EM O T E CO NTRO L  O F  EL E CT RI C AL  H EA T LO A DS. 
+The pilot studies  in the project , while demonstrating significant potentials and capabilities, due to short 
+timeframe and stochastic nature of weather , did not allow for more general quantifications or conclusions to 
+be made  on the impact s of these load shifting methods if more  fully deployed  and over longer periods . 
+Consequently a modeling exercise was carried  out to provide more insight into the possible impact of the 
+system deployment.  
+From a review  of software [21] with capability for mode ling renewable energy networks with load shifting  
+HOMER was selected  [22, 23] due to its capability for representing load shi fting as deferrable loads . The 
+'deferrable loads' function was used to capture characteristics of the 14 Centini and 24 Whins space heating 
+and hot water systems (i.e. 600kWh and 120kWh per day shiftable load in Feb and June respectively as 
+previously described in sections 2.1 and 5) . These were input to  a model of the existing Findhorn Community 
+
+
+calibrated against monitoring data . The model was then run to capture t he potential increase in self-use of 
+local renewable electricity generation due to shifting of these loads.  
+ 
+Figure 19. Primary demand (red), Renewable generation (green), and shifted thermal demand (purple) (y axis 0 
+to 800kWh/30min),  for a typical winter week (1-7 Jan) with Centini and Whins heating under ORIGIN control.  
+Figure 19 illustrates the operation for a winter week under ORIGIN control  of the Centini and Whin heating 
+loads. The bott om dark line shows the heating load now largely synchronized to  periods with renewable 
+surplus. There are still several times when this l oad has to be supplied by non renewables but the majority is 
+shifted to renewable generation. The ORIGIN remote control orchestration applied to  all 14 Centini and 25 
+Whins space heating and hot wat er loads was projected to reduce grid imports by 65MWh from 511 to 
+446MWh p.a. (13% reduction) and the corresponding increase in local renewable self-consumption was from 
+621 to 686MWh (10% increase). 
+While the HOMER modeling may be considered state-of-the-art it does not allow the detailed operation of the 
+ORIGIN system to be fully comp rehended. These modeling results should be viewed as indicative rather than 
+an accurate representation of the potential of the ORIGIN  orchestration system when applied to a Community 
+with Findhorns characteristics. More work needs to be done to enable modeling of such systems.    
+7. DISCUSSION . 
+The informational plus tariff stimulus then, if the same system was implemented across the Findhorn 
+community with the same response (21% engagement, average response), would decreased gri d imports from 
+the current 511MWh p.a. to 505MWh (1.2% reduction). If all participants exhibited the ‘motivated participant’ 
+response then imports would reduce by 38MWh to 573MWh (7.6% reduction). This 'motivated participant' 
+potential would be unlikely to  be achieved through behavioral response since even if motivated not all 
+occupants are able to respond at this level. On the other hand even the 'motivated participant' may have been 
+able to achieve an even greater response if some automation had been avai lable to assist during times of 
+sleeping or absence etc. In combination , the behavioral response plus the remote control of existing Centini 
+and Whins heating systems could be projected to give 71MWh reduction in grid imports i.e. from 511 to 
+440MWh, a 14% reduction in grid imports and corresponding 11% increase in self -consumption of local 
+renewables). The predictive model based control of the solar thermal system provided very positive results in 
+summer with electrical back up heating reduced by 44% and i ncrease in solar fraction. The alignment of 
+backup electricity with local community renewable generation was found to be increased by 22% during the 
+trial period. 
+
+
+The remote control method for the solar thermal systems was informed by three installed heat meters on 
+solar, hot water, and space heating circuits. In future it is proposed that these meters could be replaced: the 
+solar with flow and return temperature measurements and  a solar pump power measurement; the hot water 
+and space heat draws could be de termined from changes in temperature of the tank nodes; these lower cost 
+approaches are the focus of ongoing work.  
+The load shift algorithms presented here are for the solar thermal fed space and hot water heating systems 
+present in Findhorn, similar but simplified algorithms were also deployed for appliance load shifting, vehicle 
+charging and water pumping  although these loads were small compared to the thermal load . The algorithm 
+presented here for solar thermal and community level wind renewable optimization can also be adapted for 
+buildings with roof  mounted solar PV  through setting the objective function  to both maximize self -
+consumption of the buildings local PV generation , and then align any remaining demands with community 
+renewable surplus and/or low cost electricity.  
+The integration of controls and a lgorithms would ideally be done by or in cooperation with system 
+manufacturers and integrated with standard system controls. The implementation into existing systems as 
+demonstrated in ORIGIN without such cooperation is of course possible. The controls and  algorithms can be 
+deployed to communicate within a community ORIGIN system as demonstrated here, or be deployed as local 
+single building controllers which act independently and optimize individual system operation based on tariff 
+and weather data from the  internet or other source (through an ORIGIN or alternative web service). It is 
+possible to implement safe default conditions for cases when internet updates are unavailable.       
+The results reported here are of course specific to the Findhorn Community in its current configuration with 
+only monitoring and control interventions. It would be possible to achieve much higher levels of demand 
+response and reductions in energy imports if additional thermal and electrical storage was implemented .  
+CONCLUSIONS  
+The ORIGIN demand response system was implemented in the existing 75 building Findhorn Community which 
+includes high levels of renewable generation , including wind and solar , and has low energy buildings and 
+energy systems that may become more widespread in future. 
+Informational feedback mechanisms were provided giving forecasts of periods of green energy surplus or 
+green energy shortfall with the intent of stimulating behavioral change and reducing the use of grid energy. 
+These feedback mechanisms included web and phone enabled widgets. The informational feedbacks on their 
+own did not result in a sustained measurable increase in consumption of locally generated energy.   
+A tariff system was deployed to give forecasts of energy price variations associated wit h renewable surplus 
+and shortfall with a price ratio of 1:4. There was an initial observable response in 47% of participating 
+households but only 21% were observed to be responsive throughout the full period of the variable tariff 
+structure. Some very responsive ‘motivated participants’ could be identified who strongly engaged.  
+Across the Community it was projected that a 1.2% reduction in grid imports could be achieved if the same 
+21% response rate and average overall response seen on the trial was replicated, if the ‘motivated participant’ 
+behavior could be replicated across the Community then there could be a 7.6% reduction , however this is 
+unlikely in the wider population. 
+A remote control algorithm was implemented on solar f ed space heating and hot water systems and shown to 
+reduce backup electric heating energy us e by 44% in summer and increase  alignment of backup heating with 
+renewable generation by 22%. 
+
+The implementation of the remote control scheme across the 38 electric ally heated dwellings with suitable 
+systems was projected to reduce annual  grid imports by 13% with a corresponding increase in self -
+consumption of renewable generation. 
+These result s were for the specifics of  the Findhorn situation with only the ORIGIN system implemented . It 
+would be possible to design future changes in infrastructure to enhance the effectiveness of the ORIGIN 
+system and further reduce grid imports.  Some preliminary modeling studies were carried out but more work is 
+required to increase the level of certainty in their predictive skill.   
+ACKNOWLEDGEMENTS  
+The authors wish to acknowledge the assistance of  the Findhorn College, Damanhur Federation and Tame ra 
+Healing Biotope  for their support of t his research investigation. The  research leading to these results has 
+received funding from the European Union Seventh  Framework Program  (FP7/2007-2013) under grant 
+agreement N° 314742. 
+ 
+REFERENCES  
+[1] IEA Demand-Side Management Programme  http://www.ieadsm.org/ 
+[2] B.P. Esther, K.S. Kumar. A survey on residential Demand Side Management architecture, approaches, 
+optimization models and methods. Renewable and Sustainable Energy Reviews 59 (2016) 342–351 
+[3] Mathiesen, B. V., Drysdale, D., Chozas, J. F., Ridjan, I., Connolly, D., & Lund, H. (2015). A Review of Smart 
+Energy Projects & Smart Energy State-of-the-Art. Department of Development and Planning, Aalborg 
+University. 
+ [4] Aho, J., Amin, M., Annaswamy, A.M., Arnold, G., Buckspan, A., Cadena, A., Callaway, D., Camacho, E., 
+Caramanis, M., Chakrabortty, A. and Chakraborty, A., 2014. Smart Grid Research: Control Systems -IEEE Vision 
+for Smart Grid Controls: 2030 and Beyond. 
+[5] M Auffhammer, C Blumstein, M Fowlie. Demand-side management and energy efficiency revisited. The 
+Energy Journal, 2008 - JSTOR 
+ [6] Dyson M.E.H, Borgeson S.D, Tabone M.D, Callaway D.S, Using smart meter data to estimate  demand 
+response potential, with application to solar energy integration. Energy Policy, Volume 73, October 2014, 
+Pages 607-619. 
+[7] Mathieu J.L, Dyson M.E.H, Callaway D.S, Resource and revenue potential of California residential load 
+participation in ancillary services. Energy Policy, Volume 80, May 2015, Pages 76-87. 
+[8] G. Benetti et al. Electric load management approaches for peak load reduction: A systematic literature 
+review and state of the art. Sustainable Cities and Society 20 (2015) 124–141 
+[9] Owens, EH, Peacock, A, Roaf, S, Corne, D, Dissanayake, M, Galloway, S, Stephens, B & Tuohy, P 2014, 
+'Autarkic Energy Systems: Balancing Supply And Demand with Energy Storage and Controls in Local Energy 
+Micro-grids' Paper presented at 2014 Asia-Pacific Solar Research Conference, Sydney, Australia, 8/12/14 - 
+10/12/14, 
+[10] ORIGIN Concept.  http://www.origin-energy.eu/node/1 
+[11] Tuohy P. et al. Orchestration of Renewable Generation in Low Energy Buildings and Districts using Energy 
+Storage and Load Shaping. Energy Procedia 78 ( 2015 ) 2172 – 2177 
+
+[12] ORIGIN Final Report . http://www.origin-energy.eu/system/files/ORIGIN%20Final%20Report.pdf 
+[13+ Corne D et al, Short Term Wind Speed Forecasting with Evolved Neural Networks. GECCO’13, July 6 -10, 
+2013, Amsterdam, The Netherlands. 
+[14] ORIGIN D4.5. Full Specification of Combined DPA, Control and Optimisation Algorithms. 
+http://www.origin-energy.eu/system/files/ORIGIN_D4%205%20v2%2026.3.15.pdf 
+[15] ORIGIN D5.1. Energy Management System validated in the communities. http://www.origin-
+energy.eu/system/files/ORIGIN_D5.1%20v2%2026.3.15.pdf 
+[16] Peacock, AD, Chaney, J, Goldbach, K, Walker, G, Tuohy, P, Santonja, S, Todoli, D & Owens, EH 2017, 'Co -
+designing the next generation of home energy management systems with lead -users' Applied Ergonomics, vol 
+60, pp. 194-206. DOI: 10.1016/j.apergo.2016.11.016 
+[17]Findhorn Foundation. https://www.findhorn.org/aboutus/ecovillage/ecovillage -at-findhorn/ 
+[18] Duffie J.A, and Beckman W.A, Solar Engineering of Thermal Processes, John Wiley & S ons, Inc., 4th Edition, 
+ISBN: 978-0-470-87366,-3936 pages, May 2013. 
+[19] braga L.C et al. On the characterization and monitoring of building energy demand using statistical process 
+control methodologies. Energy and Buildings, Volume 65, October 2013, Pages 205–219 
+[20] Coakley, D., Raftery, P. and Keane, M., 2014. A review of methods to match building energy simulation 
+models to measured data. Renewable and Sustainable Energy Reviews, 37, pp.123-141 
+[21] Sunanda Sinha, S.S. Chandel, 2014, Review of software tools for hybrid renewable energy systems, 
+Renewable and Sustainable Energy Reviews 32 (2014) 192–205 
+ [22] HOMER Energy, http://www.homerenergy.com/ 
+ [23] Lambert T, Gilman P,  and  Lilienthal P. 2006,  Micropower System Modeling with HOMER, Publ ished in: 
+Integration of Alternative Sources of Energy, by F. Farret and M. Simões. Copyright © 2006 by John Wiley & 
+Sons, Inc. 
+ 
+ 
+ 
+ 
