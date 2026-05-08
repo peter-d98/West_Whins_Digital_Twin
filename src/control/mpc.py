@@ -55,7 +55,9 @@ from src.tank_model import TankParams
 @dataclass
 class MPCConfig:
     horizon_steps: int = 96         # 48 h
-    comfort_mid_min: float = 40.0   # hard lower bound on mid node
+    comfort_mid_min: float = 40.0   # hard lower bound on the comfort node
+    comfort_node: int = 1           # node index used for the comfort floor
+                                    # (1 = mid, 3 = top)
     ashp_setpoint: float = 55.0
     solar_thresh: float = 200.0
     solar_setpoint: float = 60.0
@@ -264,9 +266,10 @@ class MPCController:
 
         # ---- Greedy: insert until comfort satisfied ----
         max_inserts = H  # safety cap
+        node = self.cfg.comfort_node
         for _ in range(max_inserts):
             res = fc.rollout(T0, schedule); self.n_rollouts += 1
-            mid_seq = res.T_hist[1:, 1]
+            mid_seq = res.T_hist[1:, node]
             below = np.where(mid_seq < self.cfg.comfort_mid_min)[0]
             if len(below) == 0:
                 break
@@ -286,7 +289,7 @@ class MPCController:
             for j in cands:
                 schedule[j] = True
                 res2 = fc.rollout(T0, schedule); self.n_rollouts += 1
-                new_min = res2.T_hist[1:, 1][: v + 1].min()
+                new_min = res2.T_hist[1:, node][: v + 1].min()
                 if new_min > base_min + 1e-6:
                     improved = True
                     break
@@ -301,7 +304,7 @@ class MPCController:
         for j in on_slots:
             schedule[j] = False
             res = fc.rollout(T0, schedule); self.n_rollouts += 1
-            if res.T_hist[1:, 1].min() < self.cfg.comfort_mid_min - 1e-6:
+            if res.T_hist[1:, node].min() < self.cfg.comfort_mid_min - 1e-6:
                 schedule[j] = True  # restore
 
         return bool(schedule[0])

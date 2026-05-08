@@ -69,10 +69,15 @@ class SimResult:
 ControllerFn = Callable[[SimContext, np.ndarray], bool]
 
 
-def threshold_controller(ashp_trigger: float = 51.0) -> ControllerFn:
-    """Baseline rule: fire ASHP if mid-node ≤ ``ashp_trigger`` °C."""
+def threshold_controller(ashp_trigger: float = 51.0,
+                         node_index: int = M) -> ControllerFn:
+    """Baseline rule: fire ASHP if node ``node_index`` ≤ ``ashp_trigger`` °C.
+
+    Defaults to firing on the mid node (``node_index=M=1``) to preserve
+    historical behaviour. Pass ``node_index=T`` to threshold on the top.
+    """
     def _decide(ctx: SimContext, T_state: np.ndarray) -> bool:  # noqa: ARG001
-        return bool(T_state[M] <= ashp_trigger)
+        return bool(T_state[node_index] <= ashp_trigger)
     return _decide
 
 
@@ -160,6 +165,7 @@ def simulate(
     legionella_init_days: int = 0,
     legionella_overrides: Optional[np.ndarray] = None,
     safety_mid_floor: float = 40.0,
+    safety_node_idx: int = M,
     dt_s: float = DT_S,
 ) -> SimResult:
     """Run a closed-loop simulation.
@@ -278,7 +284,7 @@ def simulate(
             decision = bool(controller(ctx, T_next))
             if (not decision
                     and np.isfinite(safety_mid_floor)
-                    and T_next[M] < safety_mid_floor):
+                    and T_next[safety_node_idx] < safety_mid_floor):
                 decision = True
             if decision and T_next[M] < ashp_setpoint:
                 T_ash = T_after.copy()

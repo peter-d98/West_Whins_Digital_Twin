@@ -140,3 +140,40 @@ def static_day_night_tariff(
     is_day = (hours >= day_start_hour) & (hours < day_end_hour)
     rates = np.where(is_day, day_p_per_kwh, night_p_per_kwh)
     return pd.Series(rates, index=target_index, name="price_p_per_kwh")
+
+
+# ---------------------------------------------------------------------------
+# Findhorn site-specific flex tariff (one full year, hourly, £/kWh)
+# ---------------------------------------------------------------------------
+def load_flex_tariff(
+    csv_path: Path,
+    target_index: pd.DatetimeIndex,
+) -> pd.Series:
+    """Load the Findhorn flex-tariff CSV and map it onto ``target_index``.
+
+    The CSV provides 8760 hourly rows (one calendar year, 2019) of
+    £/kWh values under the column
+    ``"NFD Import Tariff to End Users  (£/kWh)"``. We map by
+    (month, day, hour) so the same intra-year shape can be applied to
+    any simulation year (Feb 29 falls back to Feb 28).
+
+    Returns a Series of **p/kWh** aligned to ``target_index``.
+    """
+    df = pd.read_csv(csv_path)
+    price_col = [c for c in df.columns if "Tariff" in c][0]
+    ts = pd.to_datetime(
+        df["Date"] + " " + df["Time stamp"], dayfirst=True
+    )
+    df = df.assign(
+        month=ts.dt.month, day=ts.dt.day, hour=ts.dt.hour,
+        price=df[price_col].astype(float) * 100.0,  # £/kWh -> p/kWh
+    )
+    lut = df.set_index(["month", "day", "hour"])["price"]
+
+    out = np.empty(len(target_index), dtype=float)
+    for i, ts in enumerate(target_index):
+        key = (int(ts.month), int(ts.day), int(ts.hour))
+        if key not in lut.index:  # Feb 29 -> Feb 28 fallback
+            key = (key[0], 28, key[2])
+        out[i] = float(lut.loc[key])
+    return pd.Series(out, index=target_index, name="price_p_per_kwh")
