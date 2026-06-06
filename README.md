@@ -1,3 +1,5 @@
+# NOTE: THIS README IS OUT OF DATE. WILL UPDATE SOON.
+
 # Stage‑1 – Data & Mapping 
 
 This repository builds a **Stage‑1 digital twin** for a DHW system:
