@@ -382,35 +382,32 @@ def plot_window(
         pred_p05 = pred_p95 = None
     pred_central = T_central[1:]                      # (N, 4) for plotting
 
+    plt.rcParams.update({
+        "font.size": 13,
+        "axes.titlesize": 14,
+        "axes.labelsize": 13,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 11,
+    })
+
     fig, axes = plt.subplots(
-        6, 1, figsize=(14, 16), sharex=True,
-        gridspec_kw={"height_ratios": [2, 2, 2, 2, 1.0, 1.0]},
+        4, 1, figsize=(14, 12), sharex=True,
+        gridspec_kw={"height_ratios": [1, 1, 1, 1]},
     )
-    # Panel layout (top \u2192 bottom): Top, Mid-Hi, Mid, Bottom, Solar, V_draw.
-    # The four temperature panels are reversed relative to NODE_LABELS so
-    # the stratification visible at a glance matches the physical tank.
+    # Panel layout (top → bottom): Top, Mid-Hi, Mid, Bottom.
+    # Reversed relative to NODE_LABELS so stratification matches the physical tank.
     temp_axes = {
         3: axes[0],   # Top
         2: axes[1],   # Mid-Hi
         1: axes[2],   # Mid
         0: axes[3],   # Bottom
     }
-    ax_sol = axes[4]
-    ax_dhw = axes[5]
 
-    env_msg = (f"P05\u2013P95 envelope from {n_realisations} stochastic realisations"
-               if n_realisations > 1 else
-               "deterministic central run only (envelope disabled)")
     fig.suptitle(
-        f"Free-forward tank simulation \u2014 {times[0]:%Y-%m-%d %H:%M} \u2192 "
-        f"{times[-1]:%Y-%m-%d %H:%M}\n"
-        f"Solar: illum \u2265 {solar_thresh:.0f} W/m\u00b2 \u2192 all nodes "
-        f"{solar_setpoint:.1f}\u00b0C  |  "
-        f"ASHP: mid \u2264 {ashp_trigger:.1f}\u00b0C \u2192 "
-        f"mid={ashp_setpoint:.1f}/mh={ashp_setpoint+0.5:.1f}/"
-        f"top={ashp_setpoint+1.0:.1f}\u00b0C  |  "
-        f"DHW mode: {dhw_mode}  |  {env_msg}",
-        fontsize=10,
+        f"Free-forward tank simulation — {times[0]:%Y-%m-%d %H:%M} → "
+        f"{times[-1]:%Y-%m-%d %H:%M}",
+        fontsize=15,
     )
 
     solar_spans = build_spans(solar_flags, times, dt)
@@ -439,34 +436,17 @@ def plot_window(
         err = pred_central[:-1, i] - T_meas[1:, i]
         rmse = float(np.sqrt(np.mean(err ** 2)))
         bias = float(np.mean(err))
-        ax.set_ylabel(f"{NODE_LABELS[i]} [\u00b0C]")
-        ax.legend(title=f"RMSE={rmse:.2f}\u00b0C  bias={bias:+.2f}\u00b0C",
-                  loc="best", fontsize=7, title_fontsize=7)
+        ax.set_ylabel(f"{NODE_LABELS[i]} [°C]", fontsize=13)
+        ax.legend(
+            title=f"RMSE={rmse:.2f}°C  bias={bias:+.2f}°C",
+            loc="best", fontsize=11, title_fontsize=11,
+            framealpha=0.85, edgecolor="0.4",
+        )
         ax.grid(True, alpha=0.3)
-
-    # Solar illuminance panel
-    ax_sol.step(times, solar_illum, where="post",
-                color="tab:orange", lw=1.2, label="Illuminance [W/m\u00b2]")
-    ax_sol.axhline(solar_thresh, color="tab:orange", ls=":", lw=1.0,
-                   label=f"Threshold ({solar_thresh:.0f} W/m\u00b2)")
-    ax_sol.set_ylabel("Shortwave\n[W/m\u00b2]")
-    ax_sol.legend(loc="upper right", fontsize=7, ncol=2)
-    ax_sol.grid(True, alpha=0.3)
-    ax_sol.set_ylim(bottom=0)
-
-    # DHW draw panel (bottom)
-    bar_label = ("DHW draw (median across realisations) [L]" if n_realisations > 1
-                 else "DHW draw (central, s=1) [L]")
-    ax_dhw.bar(times, V_draws_med, width=dt.total_seconds() / 86400.0,
-               color="tab:blue", alpha=0.7, align="edge",
-               label=bar_label)
-    ax_dhw.set_ylabel("V_draw\n[L per 30 min]")
-    ax_dhw.legend(loc="upper right", fontsize=7)
-    ax_dhw.grid(True, alpha=0.3)
-    ax_dhw.set_ylim(bottom=0)
+        ax.tick_params(axis="both", labelsize=12)
 
     axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%d-%b %H:%M"))
-    axes[-1].set_xlabel("Time")
+    axes[-1].set_xlabel("Time", fontsize=13)
     fig.autofmt_xdate(rotation=30)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
